@@ -75,7 +75,8 @@ class AppController(
     var license by mutableStateOf<LicensePayload?>(repo.licenseKey?.let { (validator.validate(it, today()) as? LicenseResult.Valid)?.payload })
         private set
     var demoUsed by mutableStateOf(repo.demoSearchesUsed); private set
-    val isPro: Boolean get() = license != null
+    val isPro: Boolean
+        get() = license?.let { p -> p.exp?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { today() <= it } ?: true } == true
     val demoLeft: Int get() = (Plan.FREE_DEMO_SEARCHES - demoUsed).coerceAtLeast(0)
 
     // --- radar form ---
@@ -141,8 +142,7 @@ class AppController(
         val gemini = geminiKey.takeIf { it.isNotBlank() }?.let { GeminiProvider(http, it, s.geminiModel.ifBlank { "gemini-2.5-flash" }) }
         val pplx = perplexityKey.takeIf { it.isNotBlank() }?.let { PerplexityProvider(http, it, s.perplexityModel.ifBlank { "sonar-pro" }) }
         val ordered = if (s.primary == ProviderType.GEMINI) listOf(gemini, pplx) else listOf(pplx, gemini)
-        val available = ordered.filterNotNull()
-        return if (s.fallbackEnabled) available else available.take(1)
+        return (if (s.fallbackEnabled) ordered else ordered.take(1)).filterNotNull()
     }
 
     fun searchRadar() {
@@ -158,7 +158,7 @@ class AppController(
         val base = buildQuery()
         val query = base.copy(
             moods = base.moods + group.majorityMoods(),
-            categories = (if (categories.isEmpty()) emptySet() else categories) + group.majorityCategories(),
+            categories = (categories + group.majorityCategories()).filterNot { mode == SearchMode.FAMILY && it.musicRelated }.toSet(),
             tags = base.tags + group.majorityTags(),
             ageGroups = base.ageGroups + group.ageGroups,
             budget = if (group.budget.rank < base.budget.rank) group.budget else base.budget,
