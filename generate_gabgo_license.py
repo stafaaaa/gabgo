@@ -17,6 +17,7 @@ import argparse
 import base64
 import datetime as dt
 import json
+import os
 import pathlib
 import sys
 import uuid
@@ -42,8 +43,12 @@ def new_keypair(private_path: pathlib.Path, public_path: pathlib.Path, force: bo
     if private_path.exists() and not force:
         sys.exit(f"{private_path} existiert bereits (mit --force überschreiben).")
     key = Ed25519PrivateKey.generate()
-    private_path.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    if private_path.exists():
+        private_path.unlink()
+    fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(pem)
     public_path.write_bytes(key.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
     print(f"Neues Schlüsselpaar: {private_path.name} / {public_path.name}")
