@@ -45,6 +45,13 @@ class IcsGeneratorTest {
     }
 
     @Test
+    fun explicitOffsetWinsOverDeviceTimeZone() {
+        val u = unfold(IcsGenerator.generate(event("2026-07-01T20:00+03:00", "2026-07-01T22:30:00+03:00"), berlin, now))
+        assertTrue("DTSTART:20260701T170000Z" in u)
+        assertTrue("DTEND:20260701T193000Z" in u)
+    }
+
+    @Test
     fun missingEndDefaultsToTwoHours() {
         val u = unfold(IcsGenerator.generate(event("2026-07-01 20:00"), berlin, now))
         assertTrue("DTSTART:20260701T180000Z" in u)

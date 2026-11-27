@@ -40,9 +40,9 @@ object IcsGenerator {
                 lines += "DTEND;VALUE=DATE:${formatDate(endDay.plus(DatePeriod(days = 1)))}"
             }
             is When.Time -> {
-                val startInstant = start.dateTime.toInstant(timeZone)
+                val startInstant = instantOf(event.start) ?: start.dateTime.toInstant(timeZone)
                 val endInstant = when (end) {
-                    is When.Time -> end.dateTime.toInstant(timeZone)
+                    is When.Time -> event.end?.let { instantOf(it) } ?: end.dateTime.toInstant(timeZone)
                     is When.Day -> LocalDateTime(end.date.year, end.date.month, end.date.dayOfMonth, 23, 59).toInstant(timeZone)
                     null -> startInstant + 2.hours
                 }.let { if (it > startInstant) it else startInstant + 2.hours }
@@ -83,12 +83,16 @@ object IcsGenerator {
     fun parseDateTime(value: String): When? {
         val v = value.trim().replace(' ', 'T').removeSuffix("Z")
         if (v.length == 10) return runCatching { When.Day(LocalDate.parse(v)) }.getOrNull()
-        val normalized = when {
-            v.length == 16 -> "$v:00"
-            v.length > 19 && (v[19] == '+' || v[19] == '-') -> v.substring(0, 19)
-            else -> v
-        }
+        val m = Regex("""^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(:\d{2})?(\.\d+)?([+-]\d{2}:?\d{2})?$""").matchEntire(v) ?: return null
+        val normalized = m.groupValues[1] + m.groupValues[2].ifEmpty { ":00" }
         return runCatching { When.Time(LocalDateTime.parse(normalized)) }.getOrNull()
+    }
+
+    /** Exact instant when the value carries `Z` or a UTC offset, e.g. `2026-11-28T19:30+01:00`. */
+    private fun instantOf(value: String): Instant? {
+        val v = value.trim().replace(' ', 'T')
+        val withSeconds = if (v.length > 16 && v[16] != ':') v.substring(0, 16) + ":00" + v.substring(16) else v
+        return runCatching { Instant.parse(withSeconds) }.getOrNull()
     }
 
     internal fun escape(text: String): String = text
