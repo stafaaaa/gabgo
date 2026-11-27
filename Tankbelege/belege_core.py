@@ -28,6 +28,7 @@ FUEL_WORDS = re.compile(
     r"premium|kraftstoff|autogas|\blpg\b|\bcng\b|erdgas|\bhvo\b|bleifrei",
     re.I,
 )
+ADBLUE = re.compile(r"ad\s?blue|\bdef\b|harnstoff", re.I)
 WASH_WORDS = re.compile(r"w[äa]e?sche|wasch|\bwash|glanz|autopflege|pflegeprogramm", re.I)
 TOTAL_WORDS = re.compile(r"\bsumme\b|gesamt|zu zahlen|\bbetrag\b|\btotal\b", re.I)
 KM_WORDS = re.compile(r"kilometer\s*-?\s*stand|km\s*[-.]?\s*stand|kilometer|\bkm\s*[:=]", re.I)
@@ -96,13 +97,15 @@ class FahrzeugListe:
                 out.append(v)
         return out
 
-    def match_token(self, token: str):
+    def match_token(self, token: str, fuzzy: bool = True):
         """Liefert (Fahrzeug, Hinweis) oder (None, None)."""
         variants = self._variants(token)
         for v in variants:
             if v in self.keys:
                 note = None if v == token.upper() else f"OCR-Korrektur '{token}' -> '{self.keys[v].endziffer}'"
                 return self.keys[v], note
+        if not fuzzy:
+            return None, None
         best, best_d, tie = None, 99, False
         for v in variants:
             if len(v) < 3:
@@ -130,14 +133,15 @@ class FahrzeugListe:
             while tokens and tokens[0].isalpha() and len(tokens[0]) <= 3 and tokens[0].upper() == tokens[0]:
                 tokens.pop(0)
             if tokens:
-                candidates.append(tokens[0])
                 if len(tokens) > 1 and len(tokens[1]) == 1:
                     candidates.append(tokens[0] + tokens[1])
+                candidates.append(tokens[0])
         candidates += [m.group(1) for m in PLATE_ANYWHERE.finditer(text)]
-        for cand in candidates:
-            fz, note = self.match_token(cand)
-            if fz:
-                return fz, cand, note
+        for fuzzy in (False, True):
+            for cand in candidates:
+                fz, note = self.match_token(cand, fuzzy)
+                if fz:
+                    return fz, cand, note
         return None, (candidates[0] if candidates else None), None
 
 
@@ -212,7 +216,13 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
         daten.hinweise.append(note)
     daten.datum = parse_date(text)
 
-    for line in lines:
+    fuel_lines = []
+    for i, line in enumerate(lines):
+        if ADBLUE.search(line) or (i and ADBLUE.search(lines[i - 1]) and not FUEL_WORDS.search(line)):
+            continue
+        fuel_lines.append(line)
+
+    for line in fuel_lines:
         if WASH_WORDS.search(line) or UNIT_PRICE.search(line) and not QTY.search(line):
             continue
         for m in QTY.finditer(line):
@@ -225,7 +235,7 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
             break
 
     unit_price = None
-    m = UNIT_PRICE.search(text)
+    m = UNIT_PRICE.search("\n".join(fuel_lines))
     if m:
         unit_price = to_float(m.group(1))
 
@@ -233,7 +243,8 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
         if WASH_WORDS.search(line) and not QTY.search(line):
             vals = amounts(line)
             nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if not vals and nxt and not re.search(r"/\s*st", nxt, re.I) and not TOTAL_WORDS.search(nxt):
+            if (not vals and nxt and not re.search(r"/\s*st", nxt, re.I) and not TOTAL_WORDS.search(nxt)
+                    and not QTY.search(nxt) and not FUEL_WORDS.search(nxt) and not UNIT_PRICE.search(nxt)):
                 vals = amounts(nxt)
             if vals:
                 daten.waesche_preis = vals[-1]
@@ -403,6 +414,7 @@ class BelegSeite:
     seite: int
     image: Image.Image | None = None
     text: str | None = None
+    fehler: str | None = None
 
     @property
     def name(self) -> str:
@@ -413,19 +425,29 @@ def iter_belege(ordner: Path):
     files = sorted(p for p in Path(ordner).iterdir()
                    if p.is_file() and p.suffix.lower() in BELEG_ENDUNGEN)
     for path in files:
-        if path.suffix.lower() == ".pdf":
-            with pymupdf.open(path) as doc:
-                for i, page in enumerate(doc, 1):
-                    text = page.get_text()
-                    if len(re.sub(r"\s", "", text)) >= MIN_TEXTLAYER_ZEICHEN:
-                        yield BelegSeite(path, i, text=text)
-                        continue
-                    yield BelegSeite(path, i, image=_page_image(doc, page))
-        else:
-            with Image.open(path) as im:
-                for i in range(getattr(im, "n_frames", 1)):
-                    im.seek(i)
-                    yield BelegSeite(path, i + 1, image=im.copy())
+        seite = 0
+        try:
+            for beleg in _seiten(path):
+                seite = beleg.seite
+                yield beleg
+        except Exception as exc:  # defekte Datei darf den Lauf nicht abbrechen
+            yield BelegSeite(path, seite + 1, fehler=str(exc) or type(exc).__name__)
+
+
+def _seiten(path: Path):
+    if path.suffix.lower() == ".pdf":
+        with pymupdf.open(path) as doc:
+            for i, page in enumerate(doc, 1):
+                text = page.get_text()
+                if len(re.sub(r"\s", "", text)) >= MIN_TEXTLAYER_ZEICHEN:
+                    yield BelegSeite(path, i, text=text)
+                    continue
+                yield BelegSeite(path, i, image=_page_image(doc, page))
+    else:
+        with Image.open(path) as im:
+            for i in range(getattr(im, "n_frames", 1)):
+                im.seek(i)
+                yield BelegSeite(path, i + 1, image=im.copy())
 
 
 def count_belege(ordner: Path) -> int:
@@ -433,12 +455,15 @@ def count_belege(ordner: Path) -> int:
     for path in Path(ordner).iterdir():
         if not path.is_file() or path.suffix.lower() not in BELEG_ENDUNGEN:
             continue
-        if path.suffix.lower() == ".pdf":
-            with pymupdf.open(path) as doc:
-                n += doc.page_count
-        else:
-            with Image.open(path) as im:
-                n += getattr(im, "n_frames", 1)
+        try:
+            if path.suffix.lower() == ".pdf":
+                with pymupdf.open(path) as doc:
+                    n += doc.page_count
+            else:
+                with Image.open(path) as im:
+                    n += getattr(im, "n_frames", 1)
+        except Exception:
+            n += 1
     return n
 
 

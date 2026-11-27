@@ -61,6 +61,10 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
         fortschritt(nr - 1, gesamt, f"Lese {seite.name}")
         ergebnis.belege += 1
+        if seite.fehler:
+            hinweise.append(f"{seite.datei.name}: Datei nicht lesbar – {seite.fehler}")
+            ergebnis.uebersprungen += 1
+            continue
         if seite.image is not None and not tesseract:
             hinweise.append(f"{seite.name}: übersprungen – kein Textlayer und kein Tesseract.")
             ergebnis.uebersprungen += 1
