@@ -1,7 +1,8 @@
 # Builds the Windows installer (MSI with start-menu shortcut). Requires JDK 21.
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
-if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe") -or -not ((& "$env:JAVA_HOME\bin\java.exe" -version 2>&1 | Out-String) -match '"21')) {
+function Test-Jdk21($dir) { $dir -and (Test-Path "$dir\release") -and (Select-String -Path "$dir\release" -Pattern 'JAVA_VERSION="21' -Quiet) }
+if (-not (Test-Jdk21 $env:JAVA_HOME)) {
     $jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium', 'C:\Program Files\Java' -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match '^jdk-?21' } | Sort-Object Name -Descending | Select-Object -First 1
     if (-not $jdk) { throw 'JDK 21 nicht gefunden. Installiere Temurin 21 (winget install EclipseAdoptium.Temurin.21.JDK) oder setze JAVA_HOME.' }
