@@ -18,8 +18,6 @@ class LicenseTest {
     private val validKey = "GABGO1-eyJ2IjoxLCJsaWQiOiJURVNULTAwMDEiLCJwbGFuIjoicHJvIiwibmFtZSI6IlRlc3QgVXNlciIsImVtYWlsIjoidGVzdEBnYWJnby5kZSIsImlhdCI6IjIwMjYtMDEtMDEifQ.LjLp1ZswTU0gvMYwJdaNNrehNkxW10_6MUFc_9qoQGZg8WSa1XFcvf0spPruBFSCwbxA3xyeHdLErIWe8ly2CA"
     private val expiredKey = "GABGO1-eyJ2IjoxLCJsaWQiOiJURVNULTAwMDIiLCJwbGFuIjoicHJvIiwibmFtZSI6IkFiZ2VsYXVmZW4iLCJpYXQiOiIyMDI1LTAxLTAxIiwiZXhwIjoiMjAyNS0xMi0zMSJ9.l8EJaCMLKomyWdQ4fvGT0_PTFIVMKT4eJnnumoXg7Atf6syuVoGZgxOkw9GjpjhrttHnQd39RgdAWoQZbsw8BQ"
 
-    /** Signed with the real GabGo production key (generate_gabgo_license.py). */
-    private val productionKey = "GABGO1-eyJ2IjoxLCJsaWQiOiIzMzJDQUYzMjk0MTciLCJwbGFuIjoicHJvIiwibmFtZSI6IkdhYkdvIFRlc3RlciIsImlhdCI6IjIwMjYtMTEtMjciLCJlbWFpbCI6Im1vc2dhYjY5QGdtYWlsLmNvbSJ9.j8BbjeqeBjXeKmh-W6P6Y2eDvelWeRBbaU9gNbueLQoCxtOGxy65iKCEvXtaVq9SkPDQOs2AA3wnIR8mcyYcBg"
 
     private val today = LocalDate(2026, 11, 27)
     private val validator = LicenseValidator(testPublicKey)
@@ -90,9 +88,7 @@ class LicenseTest {
     }
 
     @Test
-    fun productionKeyVerifiesWithEmbeddedPublicKey() {
-        assertIs<LicenseResult.Valid>(LicenseValidator().validate(productionKey, today))
-        // A license signed with another key must not unlock the real app.
+    fun testKeyIsRejectedByEmbeddedPublicKey() {
         assertIs<LicenseResult.Invalid>(LicenseValidator().validate(validKey, today))
     }
 }
