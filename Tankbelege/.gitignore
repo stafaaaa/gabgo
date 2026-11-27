@@ -1,0 +1,7 @@
+.venv/
+build/
+dist/
+*.spec
+Tankbelege.exe
+*_ausgefuellt.xlsx
+*_pruefung.txt
