@@ -52,6 +52,13 @@ class IcsGeneratorTest {
     }
 
     @Test
+    fun compactOffsetAndDateOnlyEndUseEventZone() {
+        val u = unfold(IcsGenerator.generate(event("2026-07-01T20:00+0300", "2026-07-01"), berlin, now))
+        assertTrue("DTSTART:20260701T170000Z" in u)
+        assertTrue("DTEND:20260701T205900Z" in u)
+    }
+
+    @Test
     fun missingEndDefaultsToTwoHours() {
         val u = unfold(IcsGenerator.generate(event("2026-07-01 20:00"), berlin, now))
         assertTrue("DTSTART:20260701T180000Z" in u)

@@ -3,10 +3,12 @@ package de.gabbas.gabgo.calendar
 import de.gabbas.gabgo.model.EventSuggestion
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.FixedOffsetTimeZone
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.UtcOffset
 import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
@@ -40,10 +42,11 @@ object IcsGenerator {
                 lines += "DTEND;VALUE=DATE:${formatDate(endDay.plus(DatePeriod(days = 1)))}"
             }
             is When.Time -> {
-                val startInstant = instantOf(event.start) ?: start.dateTime.toInstant(timeZone)
+                val startZone = zoneOf(event.start) ?: timeZone
+                val startInstant = start.dateTime.toInstant(startZone)
                 val endInstant = when (end) {
-                    is When.Time -> event.end?.let { instantOf(it) } ?: end.dateTime.toInstant(timeZone)
-                    is When.Day -> LocalDateTime(end.date.year, end.date.month, end.date.dayOfMonth, 23, 59).toInstant(timeZone)
+                    is When.Time -> end.dateTime.toInstant(event.end?.let { zoneOf(it) } ?: startZone)
+                    is When.Day -> LocalDateTime(end.date.year, end.date.month, end.date.dayOfMonth, 23, 59).toInstant(startZone)
                     null -> startInstant + 2.hours
                 }.let { if (it > startInstant) it else startInstant + 2.hours }
                 lines += "DTSTART:${formatUtc(startInstant)}"
@@ -88,11 +91,13 @@ object IcsGenerator {
         return runCatching { When.Time(LocalDateTime.parse(normalized)) }.getOrNull()
     }
 
-    /** Exact instant when the value carries `Z` or a UTC offset, e.g. `2026-11-28T19:30+01:00`. */
-    private fun instantOf(value: String): Instant? {
-        val v = value.trim().replace(' ', 'T')
-        val withSeconds = if (v.length > 16 && v[16] != ':') v.substring(0, 16) + ":00" + v.substring(16) else v
-        return runCatching { Instant.parse(withSeconds) }.getOrNull()
+    /** Fixed zone when the value carries `Z` or a UTC offset (`+01:00` / `+0100`), otherwise null. */
+    private fun zoneOf(value: String): TimeZone? {
+        val v = value.trim()
+        if (v.length > 10 && v.endsWith("Z")) return TimeZone.UTC
+        val m = Regex("""T.*([+-])(\d{2}):?(\d{2})$""").find(v) ?: return null
+        val (sign, h, min) = m.destructured
+        return runCatching { FixedOffsetTimeZone(UtcOffset.parse("$sign$h:$min")) }.getOrNull()
     }
 
     internal fun escape(text: String): String = text
