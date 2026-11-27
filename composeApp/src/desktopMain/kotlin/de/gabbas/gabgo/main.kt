@@ -8,8 +8,15 @@ import androidx.compose.ui.window.rememberWindowState
 import de.gabbas.gabgo.resources.Res
 import de.gabbas.gabgo.resources.gabgo_logo
 import org.jetbrains.compose.resources.painterResource
+import java.util.Locale
 
-fun main() = application {
+fun main() {
+    // The UI is German; keep Material date pickers consistent regardless of the OS locale.
+    Locale.setDefault(Locale.GERMANY)
+    runApp()
+}
+
+private fun runApp() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "GabGo",
