@@ -153,6 +153,10 @@ class App:
     def _oeffnen(self):
         if self.letztes_ziel and self.letztes_ziel.exists():
             if hasattr(os, "startfile"):
+                if getattr(sys, "frozen", False):
+                    # PyInstaller setzt SetDllDirectory auf _MEIPASS; das erbt Excel/LibreOffice sonst
+                    import ctypes
+                    ctypes.windll.kernel32.SetDllDirectoryW(None)
                 os.startfile(self.letztes_ziel)
             else:
                 messagebox.showinfo("Ergebnis", str(self.letztes_ziel))
