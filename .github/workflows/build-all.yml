@@ -111,8 +111,11 @@ jobs:
           xcodebuild -project iosApp/iosApp.xcodeproj -target iosApp -configuration Debug \
             -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-      - name: Zip Xcode project
-        run: zip -qr GabGo-iOS-XcodeProject.zip iosApp -x 'iosApp/build/*' '*/xcuserdata/*'
+      - name: Zip Xcode project (with the Kotlin sources its build phase needs)
+        run: |
+          zip -qr GabGo-iOS-XcodeProject.zip iosApp composeApp gradle branding_assets \
+            gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties README.md \
+            -x '*/build/*' '*/xcuserdata/*' '*/.gradle/*' '*/.kotlin/*'
       - uses: actions/upload-artifact@v4
         with:
           name: GabGo-iOS-XcodeProject.zip
