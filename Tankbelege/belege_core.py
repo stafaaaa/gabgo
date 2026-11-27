@@ -133,7 +133,7 @@ class FahrzeugListe:
             while tokens and tokens[0].isalpha() and len(tokens[0]) <= 3 and tokens[0].upper() == tokens[0]:
                 tokens.pop(0)
             if tokens:
-                if len(tokens) > 1 and len(tokens[1]) == 1:
+                if len(tokens) > 1 and len(tokens[1]) == 1 and tokens[1].isalpha():
                     candidates.append(tokens[0] + tokens[1])
                 candidates.append(tokens[0])
         candidates += [m.group(1) for m in PLATE_ANYWHERE.finditer(text)]

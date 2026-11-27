@@ -186,3 +186,8 @@ def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
     assert (ws["A3"].value, ws["J3"].value, ws["J10"].value) == ("545E", "Notiz A", "Notiz B")
     assert ws.tables["Tabelle6"].ref == "A1:G3"
+
+
+def test_zapfsaeule_hinter_kennzeichen(vorlage):
+    fz, _, _ = vorlage.fahrzeuge.find_in_text("KFZ-Kennzeichen GE EL 100 3")
+    assert fz.endziffer == 100
