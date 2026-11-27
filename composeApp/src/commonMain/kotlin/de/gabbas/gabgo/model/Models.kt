@@ -80,17 +80,17 @@ data class SearchQuery(
 
 @Serializable
 data class EventSuggestion(
-    val title: String,
+    val title: String = "",
     val category: String = "",
     val description: String = "",
     /** ISO-8601 local date (`2026-11-28`) or date-time (`2026-11-28T19:30`). */
-    val start: String,
+    val start: String = "",
     val end: String? = null,
     val venue: String = "",
     val address: String = "",
     val city: String = "",
     val priceRange: String = "",
-    val sourceUrl: String,
+    val sourceUrl: String = "",
     val ticketUrl: String? = null,
     val openingHours: String? = null,
     val ageGroups: List<String> = emptyList(),

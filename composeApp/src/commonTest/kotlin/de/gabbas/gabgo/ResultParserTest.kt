@@ -20,6 +20,7 @@ class ResultParserTest {
           {"title":"Kölner Lichter","start":"2026-12-05T19:00","venue":"Rheinufer","address":"Konrad-Adenauer-Ufer","city":"Köln","sourceUrl":"https://www.koeln.de/lichter"},
           {"title":"Ohne Quelle","start":"2026-12-05","venue":"Dom","sourceUrl":""},
           {"title":"Falsches Datum","start":"2027-01-10","venue":"Dom","sourceUrl":"https://example.com/x"},
+          {"title":"Ohne URL-Feld","start":"2026-12-05","venue":"Dom"},
           {"title":"Kein Ort","start":"2026-12-05","sourceUrl":"https://example.com/y"},
           {"title":"Ausstellung","start":"2026-11-01","end":"2027-02-01","venue":"Museum Ludwig","sourceUrl":"https://www.museum-ludwig.de/"}
         ]}
@@ -31,7 +32,7 @@ class ResultParserTest {
         val r = ResultParser.parse(answer, query, ProviderType.GEMINI, sources)
         assertEquals(SearchStatus.VERIFIED, r.status)
         assertEquals(listOf("Kölner Lichter", "Ausstellung"), r.events.map { it.title })
-        assertEquals(3, r.droppedCount)
+        assertEquals(4, r.droppedCount)
     }
 
     @Test
