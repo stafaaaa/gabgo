@@ -1,0 +1,154 @@
+name: Build all platforms
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: build-all-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/gabgo-release.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+            PW="$KEYSTORE_PASSWORD"; ALIAS="${KEY_ALIAS:-gabgo}"; KPW="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret – signing with a keystore generated for this run."
+            PW="$(openssl rand -hex 16)"; ALIAS=gabgo; KPW="$PW"
+            echo "::add-mask::$PW"
+            keytool -genkeypair -noprompt -keystore "$KS" -storetype PKCS12 -alias "$ALIAS" \
+              -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PW" -keypass "$PW" \
+              -dname "CN=GabGo, O=Gabbas, C=DE"
+          fi
+          KS="$KS" PW="$PW" ALIAS="$ALIAS" KPW="$KPW" python3 - <<'PY'
+          import os
+          def esc(v):
+              u = v.encode("utf-16-be")
+              chars = [chr(int.from_bytes(u[i:i + 2], "big")) for i in range(0, len(u), 2)]
+              out = ""
+              for i, c in enumerate(chars):
+                  if c in "\\=:#!" or (c == " " and i == 0):
+                      out += "\\" + c
+                  elif not " " <= c <= "~":
+                      out += "\\u%04x" % ord(c)
+                  else:
+                      out += c
+              return out
+          keys = {"storeFile": "KS", "storePassword": "PW", "keyAlias": "ALIAS", "keyPassword": "KPW"}
+          with open("keystore.properties", "w", encoding="ascii") as f:
+              for k, e in keys.items():
+                  f.write(f"{k}={esc(os.environ[e])}\n")
+          PY
+      - run: ./gradlew :composeApp:assembleDebug :composeApp:assembleRelease
+      - name: Collect APKs
+        run: |
+          mkdir -p dist
+          cp composeApp/build/outputs/apk/release/composeApp-release.apk dist/GabGo-Android.apk
+          cp composeApp/build/outputs/apk/debug/composeApp-debug.apk dist/GabGo-Android-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GabGo-Android.apk
+          path: dist/GabGo-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GabGo-Android-debug.apk
+          path: dist/GabGo-Android-debug.apk
+
+  windows:
+    name: Windows (MSI)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: .\gradlew.bat :composeApp:packageMsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GabGo-Windows.msi
+          path: composeApp/build/compose/binaries/main/msi/*.msi
+          if-no-files-found: error
+
+  macos:
+    name: macOS (DMG)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :composeApp:packageDmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GabGo-macOS.dmg
+          path: composeApp/build/compose/binaries/main/dmg/*.dmg
+          if-no-files-found: error
+
+  ios:
+    name: iOS (Xcode build)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: xcodebuild (iOS Simulator, no signing)
+        run: |
+          xcodebuild -project iosApp/iosApp.xcodeproj -target iosApp -configuration Debug \
+            -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Zip Xcode project (with the Kotlin sources its build phase needs)
+        run: |
+          zip -qr GabGo-iOS-XcodeProject.zip iosApp composeApp gradle branding_assets \
+            gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties README.md \
+            -x '*/build/*' '*/xcuserdata/*' '*/.gradle/*' '*/.kotlin/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GabGo-iOS-XcodeProject.zip
+          path: GabGo-iOS-XcodeProject.zip
+
+  release:
+    name: GitHub Release (tags v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows, macos, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*

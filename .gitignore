@@ -1,0 +1,20 @@
+*.iml
+.gradle/
+.kotlin/
+**/build/
+local.properties
+keystore.properties
+*.jks
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+iosApp/Pods/
+__pycache__/
+
+# Ed25519 license signing key – never commit
+gabgo_private.pem
+*.private.pem
