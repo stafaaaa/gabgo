@@ -64,6 +64,8 @@ actual object ExternalLauncher {
     }
 }
 
+private fun withoutStamp(ics: String) = ics.lineSequence().filterNot { it.startsWith("DTSTAMP:") }.joinToString("\n")
+
 actual object CalendarExporter {
     actual fun exportIcs(fileName: String, icsContent: String): Boolean {
         val home = File(System.getProperty("user.home"))
@@ -71,7 +73,7 @@ actual object CalendarExporter {
         val base = fileName.removeSuffix(".ics")
         val file = generateSequence(1) { it + 1 }
             .map { n -> File(downloads, if (n == 1) fileName else "$base-$n.ics") }
-            .first { !it.exists() || it.readText(Charsets.UTF_8) == icsContent }
+            .first { !it.exists() || withoutStamp(it.readText(Charsets.UTF_8)) == withoutStamp(icsContent) }
             .apply { writeText(icsContent, Charsets.UTF_8) }
         val opened = runCatching {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
