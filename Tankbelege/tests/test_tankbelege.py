@@ -167,7 +167,7 @@ def test_defekter_beleg_bricht_lauf_nicht_ab(tmp_path):
     doc.save(belege / "b.pdf")
     erg = verarbeiten(VORLAGE, belege, tmp_path / "t.xlsx")
     assert len(erg.zeilen) == 2 and erg.uebersprungen == 1
-    assert "a_defekt.pdf: Datei nicht lesbar" in (tmp_path / "t_pruefung.txt").read_text(encoding="utf-8")
+    assert "a_defekt.pdf (Seite 1): Datei nicht lesbar" in (tmp_path / "t_pruefung.txt").read_text(encoding="utf-8")
 
 
 def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
@@ -191,3 +191,28 @@ def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
 def test_zapfsaeule_hinter_kennzeichen(vorlage):
     fz, _, _ = vorlage.fahrzeuge.find_in_text("KFZ-Kennzeichen GE EL 100 3")
     assert fz.endziffer == 100
+
+
+def test_defekte_tiff_seite_ueberspringt_nur_diese_seite(tmp_path, monkeypatch):
+    from PIL import Image
+
+    class FakeTiff:
+        n_frames = 3
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def seek(self, i):
+            if i == 1:
+                raise OSError("Seite defekt")
+
+        def copy(self):
+            return Image.new("L", (10, 10))
+
+    (tmp_path / "scan.tif").write_bytes(b"x")
+    monkeypatch.setattr(bc.Image, "open", lambda p: FakeTiff())
+    seiten = list(bc.iter_belege(tmp_path))
+    assert [(s.seite, s.fehler is None) for s in seiten] == [(1, True), (2, False), (3, True)]

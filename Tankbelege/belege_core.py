@@ -437,17 +437,26 @@ def iter_belege(ordner: Path):
 def _seiten(path: Path):
     if path.suffix.lower() == ".pdf":
         with pymupdf.open(path) as doc:
-            for i, page in enumerate(doc, 1):
-                text = page.get_text()
-                if len(re.sub(r"\s", "", text)) >= MIN_TEXTLAYER_ZEICHEN:
-                    yield BelegSeite(path, i, text=text)
-                    continue
-                yield BelegSeite(path, i, image=_page_image(doc, page))
+            for i in range(1, doc.page_count + 1):
+                try:
+                    page = doc[i - 1]
+                    text = page.get_text()
+                    if len(re.sub(r"\s", "", text)) >= MIN_TEXTLAYER_ZEICHEN:
+                        beleg = BelegSeite(path, i, text=text)
+                    else:
+                        beleg = BelegSeite(path, i, image=_page_image(doc, page))
+                except Exception as exc:  # defekte Seite: übrige Seiten trotzdem lesen
+                    beleg = BelegSeite(path, i, fehler=str(exc) or type(exc).__name__)
+                yield beleg
     else:
         with Image.open(path) as im:
             for i in range(getattr(im, "n_frames", 1)):
-                im.seek(i)
-                yield BelegSeite(path, i + 1, image=im.copy())
+                try:
+                    im.seek(i)
+                    beleg = BelegSeite(path, i + 1, image=im.copy())
+                except Exception as exc:
+                    beleg = BelegSeite(path, i + 1, fehler=str(exc) or type(exc).__name__)
+                yield beleg
 
 
 def count_belege(ordner: Path) -> int:
