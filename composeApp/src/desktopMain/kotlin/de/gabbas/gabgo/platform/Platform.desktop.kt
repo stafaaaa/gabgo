@@ -68,7 +68,11 @@ actual object CalendarExporter {
     actual fun exportIcs(fileName: String, icsContent: String): Boolean {
         val home = File(System.getProperty("user.home"))
         val downloads = File(home, "Downloads").takeIf { it.isDirectory } ?: File(appDataDir(), "export").apply { mkdirs() }
-        val file = File(downloads, fileName).apply { writeText(icsContent, Charsets.UTF_8) }
+        val base = fileName.removeSuffix(".ics")
+        val file = generateSequence(1) { it + 1 }
+            .map { n -> File(downloads, if (n == 1) fileName else "$base-$n.ics") }
+            .first { !it.exists() || it.readText(Charsets.UTF_8) == icsContent }
+            .apply { writeText(icsContent, Charsets.UTF_8) }
         val opened = runCatching {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
                 Desktop.getDesktop().open(file); true
