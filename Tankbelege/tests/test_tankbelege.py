@@ -136,3 +136,53 @@ def test_ollama_antwort_wird_ausgewertet(vorlage, monkeypatch):
     d = bc.ollama_extract("...", vorlage.fahrzeuge)
     assert (d.fahrzeug.endziffer, d.datum, d.menge, d.kraftstoff_preis, d.waesche_preis, d.kilometerstand) == \
         ("545E", date(2026, 1, 20), 56.37, 101.41, 11.49, 11836)
+
+
+def test_getrennter_buchstabe_im_kennzeichen(vorlage):
+    fz, _, _ = vorlage.fahrzeuge.find_in_text("KFZ-Kennzeichen GE LE 102 E")
+    assert fz.endziffer == "102E"
+    fz, _, _ = vorlage.fahrzeuge.find_in_text("KFZ-Kennzeichen GE LE 102")
+    assert fz.endziffer == 102
+
+
+def test_waschwerbung_ist_keine_waesche(vorlage):
+    d = bc.parse_text("Autowäsche geöffnet\nDiesel 40,00 l 70,00\n1,750 €/l\n01.02.2026\n"
+                      "Summe 70,00\nKennzeichen GE EL 545E", vorlage.fahrzeuge)
+    assert (d.menge, d.kraftstoff_preis, d.waesche_preis) == (40.0, 70.0, None)
+
+
+def test_adblue_ist_kein_kraftstoff(vorlage):
+    d = bc.parse_text("AdBlue 10,00 l 8,99\n0,899 €/l\nDiesel 40,00 l 70,00\n1,750 €/l\n"
+                      "01.02.2026\nSumme 78,99\nKennzeichen GE EL 545E", vorlage.fahrzeuge)
+    assert (d.menge, d.kraftstoff_preis) == (40.0, 70.0)
+
+
+def test_defekter_beleg_bricht_lauf_nicht_ab(tmp_path):
+    import pymupdf
+    belege = tmp_path / "Belege"
+    belege.mkdir()
+    (belege / "a_defekt.pdf").write_bytes(b"kein pdf")
+    doc = pymupdf.open()
+    doc.new_page().insert_text((40, 60), BELEG_TEXT, fontsize=9)
+    doc.save(belege / "b.pdf")
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "t.xlsx")
+    assert len(erg.zeilen) == 2 and erg.uebersprungen == 1
+    assert "a_defekt.pdf: Datei nicht lesbar" in (tmp_path / "t_pruefung.txt").read_text(encoding="utf-8")
+
+
+def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
+    src = tmp_path / "mit_notiz.xlsx"
+    with zipfile.ZipFile(VORLAGE) as zin, zipfile.ZipFile(src, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info)
+            if info.filename == "xl/worksheets/sheet2.xml":
+                data = data.decode().replace(
+                    "</sheetData>",
+                    '<row r="3"><c r="J3" t="inlineStr"><is><t>Notiz A</t></is></c></row>'
+                    '<row r="10"><c r="J10" t="inlineStr"><is><t>Notiz B</t></is></c></row></sheetData>').encode()
+            zout.writestr(info, data)
+    ziel = tmp_path / "out.xlsx"
+    ExcelVorlage(src).speichern(ziel, [Zeile("545E", date(2026, 1, 20), 56.37, 101.41, 11836)])
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert (ws["A3"].value, ws["J3"].value, ws["J10"].value) == ("545E", "Notiz A", "Notiz B")
+    assert ws.tables["Tabelle6"].ref == "A1:G3"

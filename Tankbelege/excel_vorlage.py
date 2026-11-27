@@ -158,8 +158,10 @@ class ExcelVorlage:
         table_end = int(re.search(r"(\d+)$", self.table_ref).group(1))
         filled = [n for n, m in rows.items() if n >= 2 and _has_values(m.group(0))]
         start = max(filled + [2]) + 1
-        removable = [n for n in rows if n >= start]
-        for n in sorted(removable, reverse=True):
+        # Zeilen unterhalb der Daten: Inhalte außerhalb A:G (z. B. Notizen) bleiben erhalten.
+        later = {n: rows[n].group(0) for n in rows if n >= start}
+        removable = [n for n, xml in later.items() if not _fremde_zellen(xml)]
+        for n in sorted(later, reverse=True):
             m = rows[n]
             sheet = sheet[:m.start()] + sheet[m.end():]
 
@@ -184,14 +186,24 @@ class ExcelVorlage:
                 cells.append(self._value_cell(f"F{n}", z.preis, strings))
             if z.kilometerstand is not None:
                 cells.append(self._value_cell(f"G{n}", z.kilometerstand, strings))
-            new_xml.append(f'<row r="{n}" {row_attrs}>' + "".join(cells) + "</row>")
+            if n in later:
+                fremd = _fremde_zellen(later.pop(n))
+                attrs = re.match(r"<row ([^>]*?)/?>", rows[n].group(0)).group(1)
+                attrs = " ".join(a for a in re.findall(r'[\w:]+="[^"]*"', attrs)
+                                 if a.split("=")[0] not in ("r", "spans"))
+                new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells + fremd) + "</row>"))
+            else:
+                new_xml.append((n, f'<row r="{n}" {row_attrs}>' + "".join(cells) + "</row>"))
+        new_xml += [(n, xml) for n, xml in later.items() if n not in removable]
+        new_xml = [xml for _, xml in sorted(new_xml)]
         last = (numbers[-1] if numbers else max(start - 1, 2))
 
         if "</sheetData>" in sheet:
             sheet = sheet.replace("</sheetData>", "".join(new_xml) + "</sheetData>", 1)
         else:
             sheet = sheet.replace("<sheetData/>", "<sheetData>" + "".join(new_xml) + "</sheetData>", 1)
-        sheet = re.sub(r'(<dimension ref=")[^"]*(")', rf"\g<1>A1:G{last}\g<2>", sheet, 1)
+        sheet = re.sub(r'(<dimension ref=")[^"]*(")', lambda m: m.group(1) + _dimension(m.group(0), last) + m.group(2),
+                       sheet, 1)
         parts[self.sheet_part] = sheet.encode("utf-8")
 
         table = parts[self.table_part].decode("utf-8")
@@ -242,6 +254,26 @@ class ExcelVorlage:
                   + "</cellXfs>" + styles[m.end():])
         parts[self.styles_part] = styles.encode("utf-8")
         return len(xfs)
+
+
+def _col_nr(col: str) -> int:
+    n = 0
+    for ch in col:
+        n = n * 26 + ord(ch) - 64
+    return n
+
+
+def _fremde_zellen(row_xml: str) -> list[str]:
+    """Zellen rechts der Tabelle (ab Spalte H) – gehören nicht zu Tabelle6."""
+    return [m.group(0) for m in CELL_RE.finditer(row_xml) if _col_nr(m.group(1)) > 7]
+
+
+def _dimension(tag: str, last_row: int) -> str:
+    m = re.search(r':([A-Z]+)(\d+)"', tag)
+    col, row = ("G", last_row) if not m else (m.group(1), int(m.group(2)))
+    if _col_nr(col) < 7:
+        col = "G"
+    return f"A1:{col}{max(row, last_row)}"
 
 
 def _has_values(row_xml: str) -> bool:
@@ -300,8 +332,10 @@ def _update_calc_chain(xml: str, sheet_index: int, removed_rows, new_rows) -> st
     removed = set(removed_rows)
     kept = [a for a in entries
             if not (a["i"] == str(sheet_index) and int(re.search(r"\d+", a["r"]).group(0)) in removed)]
+    vorhanden = {(a["i"], a["r"]) for a in kept}
     for n in new_rows:
-        kept += [{"r": f"B{n}", "i": str(sheet_index)}, {"r": f"C{n}", "i": str(sheet_index)}]
+        kept += [{"r": f"{c}{n}", "i": str(sheet_index)} for c in "BC"
+                 if (str(sheet_index), f"{c}{n}") not in vorhanden]
     body = "".join("<c " + " ".join(f'{k}="{v}"' for k, v in a.items()) + "/>" for a in kept)
     head = xml[:xml.index("<calcChain")]
     open_tag = re.search(r"<calcChain\b[^>]*>", xml).group(0)
