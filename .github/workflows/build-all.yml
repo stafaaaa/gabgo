@@ -44,9 +44,25 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PW" -keypass "$PW" \
               -dname "CN=GabGo, O=Gabbas, C=DE"
           fi
-          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
-          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-            "$(esc "$KS")" "$(esc "$PW")" "$(esc "$ALIAS")" "$(esc "$KPW")" > keystore.properties
+          KS="$KS" PW="$PW" ALIAS="$ALIAS" KPW="$KPW" python3 - <<'PY'
+          import os
+          def esc(v):
+              u = v.encode("utf-16-be")
+              chars = [chr(int.from_bytes(u[i:i + 2], "big")) for i in range(0, len(u), 2)]
+              out = ""
+              for i, c in enumerate(chars):
+                  if c in "\\=:#!" or (c == " " and i == 0):
+                      out += "\\" + c
+                  elif not " " <= c <= "~":
+                      out += "\\u%04x" % ord(c)
+                  else:
+                      out += c
+              return out
+          keys = {"storeFile": "KS", "storePassword": "PW", "keyAlias": "ALIAS", "keyPassword": "KPW"}
+          with open("keystore.properties", "w", encoding="ascii") as f:
+              for k, e in keys.items():
+                  f.write(f"{k}={esc(os.environ[e])}\n")
+          PY
       - run: ./gradlew :composeApp:assembleDebug :composeApp:assembleRelease
       - name: Collect APKs
         run: |
