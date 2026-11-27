@@ -123,6 +123,7 @@ class FahrzeugListe:
     def find_in_text(self, text: str):
         """Sucht das Kennzeichen im Belegtext. Liefert (Fahrzeug, Rohwert, Hinweis)."""
         candidates: list[str] = []
+        alternativen: dict[str, str] = {}
         for line in text.splitlines():
             m = PLATE_WORDS.search(line)
             if not m:
@@ -133,14 +134,21 @@ class FahrzeugListe:
             while tokens and tokens[0].isalpha() and len(tokens[0]) <= 3 and tokens[0].upper() == tokens[0]:
                 tokens.pop(0)
             if tokens:
-                if len(tokens) > 1 and len(tokens[1]) == 1 and tokens[1].isalpha():
-                    candidates.append(tokens[0] + tokens[1])
+                nach = tokens[1] if len(tokens) > 1 and len(tokens[1]) == 1 else ""
+                if nach.isalpha() or nach in ("€", "£"):
+                    candidates.append(tokens[0] + nach)
+                elif nach in E_LIKE:  # Ziffer: verlesenes E oder z. B. Zapfsäulennummer
+                    alternativen[tokens[0]] = tokens[0] + "E"
                 candidates.append(tokens[0])
         candidates += [m.group(1) for m in PLATE_ANYWHERE.finditer(text)]
         for fuzzy in (False, True):
             for cand in candidates:
                 fz, note = self.match_token(cand, fuzzy)
                 if fz:
+                    alt = self.keys.get(alternativen.get(cand, ""))
+                    if alt is not None and alt is not fz:
+                        note = ((note + "; ") if note else "") + (
+                            f"unsicher: Kennzeichen könnte auch '{alt.endziffer}' sein (statt '{fz.endziffer}')")
                     return fz, cand, note
         return None, (candidates[0] if candidates else None), None
 

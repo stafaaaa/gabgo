@@ -217,3 +217,14 @@ def test_defekte_tiff_seite_ueberspringt_nur_diese_seite(tmp_path, monkeypatch):
     monkeypatch.setattr(bc.Image, "open", lambda p: FakeTiff())
     seiten = list(bc.iter_belege(tmp_path))
     assert [(s.seite, s.fehler is None) for s in seiten] == [(1, True), (2, False), (3, True)]
+
+
+@pytest.mark.parametrize("zeile,erwartet,warnung", [
+    ("KFZ-Kennzeichen GE LE 102 €", "102E", False),
+    ("KFZ-Kennzeichen GE LE 102 6", 102, True),
+    ("KFZ-Kennzeichen GE EL 100 3", 100, False),
+])
+def test_abgetrenntes_e_oder_ziffer(vorlage, zeile, erwartet, warnung):
+    fz, _, note = vorlage.fahrzeuge.find_in_text(zeile)
+    assert fz.endziffer == erwartet
+    assert bool(note and "unsicher" in note) == warnung
