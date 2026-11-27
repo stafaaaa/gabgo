@@ -30,20 +30,23 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           KS="$RUNNER_TEMP/gabgo-release.jks"
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
-            PW="$KEYSTORE_PASSWORD"; ALIAS="${KEY_ALIAS:-gabgo}"
+            PW="$KEYSTORE_PASSWORD"; ALIAS="${KEY_ALIAS:-gabgo}"; KPW="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
           else
             echo "::warning::No ANDROID_KEYSTORE_BASE64 secret – signing with a keystore generated for this run."
-            PW="$(openssl rand -hex 16)"; ALIAS=gabgo
+            PW="$(openssl rand -hex 16)"; ALIAS=gabgo; KPW="$PW"
             echo "::add-mask::$PW"
             keytool -genkeypair -noprompt -keystore "$KS" -storetype PKCS12 -alias "$ALIAS" \
               -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PW" -keypass "$PW" \
               -dname "CN=GabGo, O=Gabbas, C=DE"
           fi
-          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KS" "$PW" "$ALIAS" "$PW" > keystore.properties
+          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$(esc "$KS")" "$(esc "$PW")" "$(esc "$ALIAS")" "$(esc "$KPW")" > keystore.properties
       - run: ./gradlew :composeApp:assembleDebug :composeApp:assembleRelease
       - name: Collect APKs
         run: |
