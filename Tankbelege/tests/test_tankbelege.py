@@ -178,7 +178,7 @@ def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
             if info.filename == "xl/worksheets/sheet2.xml":
                 data = data.decode().replace(
                     "</sheetData>",
-                    '<row r="3"><c r="J3" t="inlineStr"><is><t>Notiz A</t></is></c></row>'
+                    '<row r="3" hidden="1"><c r="J3" t="inlineStr"><is><t>Notiz A</t></is></c></row>'
                     '<row r="10"><c r="J10" t="inlineStr"><is><t>Notiz B</t></is></c></row></sheetData>').encode()
             zout.writestr(info, data)
     ziel = tmp_path / "out.xlsx"
@@ -186,6 +186,7 @@ def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
     assert (ws["A3"].value, ws["J3"].value, ws["J10"].value) == ("545E", "Notiz A", "Notiz B")
     assert ws.tables["Tabelle6"].ref == "A1:G3"
+    assert not ws.row_dimensions[3].hidden
 
 
 def test_zapfsaeule_hinter_kennzeichen(vorlage):

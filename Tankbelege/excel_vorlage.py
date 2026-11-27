@@ -190,7 +190,7 @@ class ExcelVorlage:
                 fremd = _fremde_zellen(later.pop(n))
                 attrs = re.match(r"<row ([^>]*?)/?>", rows[n].group(0)).group(1)
                 attrs = " ".join(a for a in re.findall(r'[\w:]+="[^"]*"', attrs)
-                                 if a.split("=")[0] not in ("r", "spans"))
+                                 if a.split("=")[0] not in ("r", "spans", "hidden"))
                 new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells + fremd) + "</row>"))
             else:
                 new_xml.append((n, f'<row r="{n}" {row_attrs}>' + "".join(cells) + "</row>"))
