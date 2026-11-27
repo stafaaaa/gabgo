@@ -137,7 +137,7 @@ compose.desktop {
             includeAllModules = true
 
             windows {
-                iconFile.set(project.file("icons/gabgo.ico"))
+                iconFile.set(rootProject.file("branding_assets/gabgo.ico"))
                 menu = true
                 menuGroup = "GabGo"
                 shortcut = true
@@ -145,12 +145,12 @@ compose.desktop {
                 upgradeUuid = "6f1d3c5e-2b7a-4f0e-9a61-7d2c8e4b9a10"
             }
             macOS {
-                iconFile.set(project.file("icons/gabgo.icns"))
+                iconFile.set(rootProject.file("branding_assets/gabgo.icns"))
                 bundleID = "de.gabbas.gabgo"
                 dockName = "GabGo"
             }
             linux {
-                iconFile.set(project.file("icons/gabgo.png"))
+                iconFile.set(rootProject.file("branding_assets/gabgo-512.png"))
             }
         }
     }
