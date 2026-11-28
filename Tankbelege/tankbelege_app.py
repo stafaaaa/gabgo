@@ -173,7 +173,7 @@ def cli(argv) -> int:
                       fortschritt=lambda x, g, t: print(f"[{x}/{g}] {t}"), log=print)
     for n, z in erg.zeilen:
         print(f"Zeile {n}: {_zeile_text(z)}")
-    print(f"Gespeichert: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
+    print(f"{'Angehängt an' if erg.angehaengt else 'Gespeichert'}: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
     return 0
 
 
