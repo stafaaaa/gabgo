@@ -26,11 +26,25 @@ MIN_TEXTLAYER_ZEICHEN = 40
 AMOUNT = r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+,\d{2}|\d+[.,]\d{2})(?![\d])"
 FUEL_WORDS = re.compile(
     r"super|diesel|benzin|e\s?10\b|\be\s?5\b|euro\s?95|v-?power|ultimate|excellium|"
-    r"premium|kraftstoff|autogas|\blpg\b|\bcng\b|erdgas|\bhvo\b|bleifrei",
+    r"premium|kraftstoff|autogas|\blpg\b|\bcng\b|erdgas|\bhvo\b|bleifrei|bio-?\s?methan|"
+    r"\bgas\b|[hl]-gas|fl[üu]e?ssiggas",
     re.I,
 )
 ADBLUE = re.compile(r"ad\s?blue|\bdef\b|harnstoff", re.I)
-WASH_WORDS = re.compile(r"w[äa]e?sche|wasch|\bwash|glanz|autopflege|pflegeprogramm", re.I)
+WASH_WORDS = re.compile(r"w[äa]e?sche|wasch|\bwash|glanz|pflegeprogramm", re.I)
+WAESCHE = "Wäsche"
+# Bezahlte Positionen außer Kraftstoff; Reihenfolge: spezifische Begriffe zuerst ("Scheibenwaschmittel").
+POSTEN_ARTEN = [
+    ("Wischwasser", re.compile(r"wisch\s*wasser|scheiben\s*-?\s*(?:reinig|klar|frost|wasch)|frostschutz|"
+                               r"screen\s?wash", re.I)),
+    (WAESCHE, WASH_WORDS),
+    ("AdBlue", ADBLUE),
+    ("Motoröl", re.compile(r"motor\s*-?\s*[öo]e?l|\b[öo]e?l\b|\b\d{1,2}w-?\d{2}\b", re.I)),
+    ("Pflege", re.compile(r"pflege|reinig|staubsaug|\bsauger\b|politur|cockpit", re.I)),
+    ("Zubehör", re.compile(r"zubeh[öo]r|scheibenwischer|wischerbl|enteiser|eiskratzer|gl[üu]hlampe|"
+                           r"leuchtmittel", re.I)),
+]
+KEIN_POSTEN = re.compile(r"rabatt|gutschein|bonus|payback|punkte|storno|mwst|\bust\b|netto|steuer|pfand", re.I)
 TOTAL_WORDS = re.compile(r"\bsumme\b|gesamt|zu zahlen|\bbetrag\b|\btotal\b", re.I)
 KM_WORDS = re.compile(r"kilometer\s*-?\s*stand|km\s*[-.]?\s*stand|kilometer|\bkm\s*[:=]", re.I)
 PLATE_WORDS = re.compile(r"kennz|kfz|fahrzeug|\bkz\b", re.I)
@@ -60,16 +74,38 @@ def amounts(line: str) -> list[float]:
             if not re.match(r"\s*(?:€|EUR|E)?\s*/", line[m.end():])]
 
 
+def betraege(line: str) -> list[float]:
+    """Euro-Beträge einer Zeile ohne Mengen (l/kg) und Stück-/Literpreise."""
+    return [v for v, m in ((to_float(m.group(1)), m) for m in re.finditer(AMOUNT, line))
+            if not re.match(r"\s*(?:€|EUR|E)?\s*/", line[m.end():])
+            and not re.match(r"\s*(?:l|liter|ltr|kg)\b", line[m.end():], re.I)]
+
+
+def posten_art(line: str) -> str | None:
+    for art, rx in POSTEN_ARTEN:
+        if rx.search(line):
+            return art
+    return None
+
+
+PLATE_GENERIC = re.compile(r"\b([A-ZÄÖÜ]{1,3})[\s-]+([A-Z]{1,2})[\s-]*(\d{1,4}\s?[EH]?)\b")
+
+
 @dataclass
 class Fahrzeug:
     endziffer: object
     kennzeichen: str
     fahrer: str
+    neu: bool = False  # vom Import in "Liste KfZ_Fahrer" ergänzt
 
 
 class FahrzeugListe:
-    def __init__(self, fahrzeuge: list[Fahrzeug]):
+    def __init__(self, fahrzeuge: list[Fahrzeug], reserve: "FahrzeugListe | None" = None):
         self.fahrzeuge = fahrzeuge
+        # Unbekannte Fahrzeuge anlegen statt Beleg verwerfen; reserve = Liste der festen Vorlage
+        self.neu_erlaubt = False
+        self.reserve = reserve
+        self.neue: list[Fahrzeug] = []
         self.keys: dict[str, Fahrzeug] = {}
         for f in fahrzeuge:
             self.keys.setdefault(self._norm(f.endziffer), f)
@@ -97,6 +133,24 @@ class FahrzeugListe:
             if v and v not in out:
                 out.append(v)
         return out
+
+    def _neu_anlegen(self, cand: str, text: str) -> Fahrzeug | None:
+        """Fahrzeug, das nicht in der Liste steht: aus der festen Vorlage übernehmen oder sauber gelesen neu anlegen."""
+        vorlage, _ = self.reserve.match_token(cand, fuzzy=False) if self.reserve else (None, None)
+        t = re.sub(r"\s", "", cand).upper().replace("€", "E").replace("£", "E")
+        if vorlage is None and not re.fullmatch(r"\d{2,4}[EH]?", t):
+            return None
+        if vorlage is not None:
+            fz = Fahrzeug(vorlage.endziffer, vorlage.kennzeichen, vorlage.fahrer, neu=True)
+        else:
+            fz = Fahrzeug(int(t) if t.isdigit() else t, _kennzeichen_zu(t, text), "Neu", neu=True)
+        key = self._norm(fz.endziffer)
+        if key in self.keys:
+            return self.keys[key]
+        self.fahrzeuge.append(fz)
+        self.keys[key] = fz
+        self.neue.append(fz)
+        return fz
 
     def match_token(self, token: str, fuzzy: bool = True):
         """Liefert (Fahrzeug, Hinweis) oder (None, None)."""
@@ -143,6 +197,11 @@ class FahrzeugListe:
                 candidates.append(tokens[0])
         candidates += [m.group(1) for m in PLATE_ANYWHERE.finditer(text)]
         for fuzzy in (False, True):
+            if fuzzy and self.neu_erlaubt:
+                for cand in candidates:
+                    fz = self._neu_anlegen(cand, text)
+                    if fz:
+                        return fz, cand, None
             for cand in candidates:
                 fz, note = self.match_token(cand, fuzzy)
                 if fz:
@@ -152,6 +211,17 @@ class FahrzeugListe:
                             f"unsicher: Kennzeichen könnte auch '{alt.endziffer}' sein (statt '{fz.endziffer}')")
                     return fz, cand, note
         return None, (candidates[0] if candidates else None), None
+
+
+def _kennzeichen_zu(endziffer: str, text: str) -> str:
+    for m in PLATE_ANYWHERE.finditer(text):
+        if re.sub(r"\s", "", m.group(1)).upper().replace("€", "E") == endziffer:
+            mitte = re.match(r"[GC6][EF€]\s*[-.\s]\s*([EL])", m.group(0)).group(1)
+            return f"GE {'EL' if mitte == 'E' else 'LE'} {endziffer}"
+    for m in PLATE_GENERIC.finditer(text.upper()):
+        if m.group(3).replace(" ", "") == endziffer:
+            return f"{m.group(1)} {m.group(2)} {endziffer}"
+    return ""
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -175,10 +245,11 @@ class BelegDaten:
     waesche_preis: float | None = None
     kilometerstand: int | None = None
     summe: float | None = None
+    posten: tuple = ()  # ((Art, Betrag), ...) z. B. ("AdBlue", 8.99) – alles außer Kraftstoff und Wäsche
     hinweise: list[str] = field(default_factory=list)
 
     FELDER = ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
-              "kilometerstand", "summe")
+              "kilometerstand", "summe", "posten")
 
     @property
     def hat_kraftstoff(self) -> bool:
@@ -186,7 +257,16 @@ class BelegDaten:
 
     @property
     def hat_waesche(self) -> bool:
-        return self.waesche_preis is not None
+        return self.waesche_preis is not None and self.waesche_preis > 0
+
+    def erfasst(self) -> float:
+        """Summe aller als Zeile erfassten Beträge."""
+        return round((self.kraftstoff_preis or 0) + (self.waesche_preis if self.hat_waesche else 0)
+                     + sum(p for _, p in self.posten), 2)
+
+    def rest(self) -> float | None:
+        """Betrag laut Summe, der keiner Zeile zugeordnet ist (None = keine Summe erkannt)."""
+        return None if self.summe is None else round(self.summe - self.erfasst(), 2)
 
     def fehlende_pflichtfelder(self) -> list[str]:
         fehlt = []
@@ -194,8 +274,8 @@ class BelegDaten:
             fehlt.append("Endziffer/Kennzeichen")
         if self.datum is None:
             fehlt.append("Datum")
-        if not self.hat_kraftstoff and not self.hat_waesche:
-            fehlt.append("Liter/kg bzw. Wäsche")
+        if not self.hat_kraftstoff and not self.hat_waesche and not self.posten:
+            fehlt.append("Kraftstoff, Wäsche oder sonstiger Posten")
         if self.hat_kraftstoff and self.kraftstoff_preis is None:
             fehlt.append("Kraftstoffpreis")
         return fehlt
@@ -225,9 +305,18 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
         daten.hinweise.append(note)
     daten.datum = parse_date(text)
 
+    summen, benutzt = _posten(lines)
+    daten.waesche_preis = summen.pop(WAESCHE, None)
+    daten.posten = tuple(summen.items())
+
+    def sonstiger_posten(zeile: str) -> bool:
+        art = posten_art(zeile)
+        return art is not None and art != WAESCHE and not _ist_kraftstoffzeile(zeile, art)
+
     fuel_lines = []
     for i, line in enumerate(lines):
-        if ADBLUE.search(line) or (i and ADBLUE.search(lines[i - 1]) and not FUEL_WORDS.search(line)):
+        if (i in benutzt and not WASH_WORDS.search(line)) or sonstiger_posten(line) or (
+                i and sonstiger_posten(lines[i - 1]) and not FUEL_WORDS.search(line)):
             continue
         fuel_lines.append(line)
 
@@ -247,17 +336,6 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
     m = UNIT_PRICE.search("\n".join(fuel_lines))
     if m:
         unit_price = to_float(m.group(1))
-
-    for i, line in enumerate(lines):
-        if WASH_WORDS.search(line) and not QTY.search(line):
-            vals = amounts(line)
-            nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if (not vals and nxt and not re.search(r"/\s*st", nxt, re.I) and not TOTAL_WORDS.search(nxt)
-                    and not QTY.search(nxt) and not FUEL_WORDS.search(nxt) and not UNIT_PRICE.search(nxt)):
-                vals = amounts(nxt)
-            if vals:
-                daten.waesche_preis = vals[-1]
-                break
 
     for line in lines:
         if TOTAL_WORDS.search(line):
@@ -280,7 +358,7 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
                         price = vals[-1]
                         break
         if price is None and daten.summe is not None:
-            price = round(daten.summe - (daten.waesche_preis or 0), 2)
+            price = round(daten.summe - (daten.waesche_preis or 0) - sum(p for _, p in daten.posten), 2)
             daten.hinweise.append("Kraftstoffpreis aus Summe abgeleitet")
         if price is None and unit_price:
             price = round(daten.menge * unit_price, 2)
@@ -298,6 +376,37 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
                 daten.kilometerstand = value
                 break
     return daten
+
+
+def _ist_kraftstoffzeile(line: str, art: str | None) -> bool:
+    """Kraftstoffzeile mit Menge, die nur nebenbei ein Postenwort enthält ("Super E10 Pflegeformel")."""
+    return art != "AdBlue" and bool(FUEL_WORDS.search(line) and QTY.search(line))
+
+
+def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
+    """Bezahlte Positionen außer Kraftstoff: {Art: Betrag} und die dafür gelesenen Zeilen."""
+    gesehen: dict[str, set[float]] = {}
+    benutzt: set[int] = set()
+    for i, line in enumerate(lines):
+        art = posten_art(line)
+        if not art or i in benutzt or KEIN_POSTEN.search(line) or TOTAL_WORDS.search(line):
+            continue
+        if (art == WAESCHE and QTY.search(line)) or _ist_kraftstoffzeile(line, art):
+            continue
+        vals = [v for v in betraege(line) if v > 0]
+        zeilen = {i}
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if (not vals and nxt and not posten_art(nxt) and not TOTAL_WORDS.search(nxt)
+                and not FUEL_WORDS.search(nxt) and not KEIN_POSTEN.search(nxt)):
+            # Werbung ("Autowäsche geöffnet", "Wäsche ab 9,99 €/St") ist keine gekaufte Wäsche
+            if art != WAESCHE or not (re.search(r"/\s*st", nxt, re.I) or QTY.search(nxt) or UNIT_PRICE.search(nxt)):
+                vals = [v for v in betraege(nxt) if v > 0]
+                zeilen.add(i + 1)
+        if vals:
+            # Viele Bons listen eine Position zweimal (Kopf + Artikelzeile): gleicher Betrag zählt einmal
+            gesehen.setdefault(art, set()).add(vals[-1])
+            benutzt |= zeilen
+    return {art: round(sum(werte), 2) for art, werte in gesehen.items()}, benutzt
 
 
 def combine(results: list[BelegDaten]) -> BelegDaten:
@@ -330,6 +439,8 @@ def _fmt(v) -> str:
         return str(v.endziffer)
     if isinstance(v, date):
         return v.strftime("%d.%m.%Y")
+    if isinstance(v, tuple):
+        return " + ".join(f"{a} {p:.2f}" for a, p in v) or "keine"
     return str(v)
 
 
@@ -501,25 +612,34 @@ def _page_image(doc, page) -> Image.Image:
     return Image.open(io.BytesIO(pix.tobytes("png")))
 
 
-# ---------------------------------------------------------------- Ollama
+# ---------------------------------------------------------------- KI (Ollama, OpenRouter, ...)
+
+POSTEN_NAMEN = [a for a, _ in POSTEN_ARTEN if a != WAESCHE]
+
+
+def ki_prompt(text: str | None, fahrzeuge: FahrzeugListe, mit_bild: bool) -> str:
+    endziffern = ", ".join(str(f.endziffer) for f in fahrzeuge.fahrzeuge if f.endziffer not in (0, None))
+    quelle = "das Bild eines deutschen Tankbelegs" if mit_bild else "den OCR-Text eines deutschen Tankbelegs"
+    prompt = (
+        f"Du liest {quelle}. Antworte NUR mit JSON mit den Schlüsseln "
+        '"kennzeichen" (z. B. "GE EL 545E"), "datum" (TT.MM.JJJJ), "menge" (getankte Liter oder kg als Zahl, '
+        'auch Gas wie CNG/LPG), "einheit" ("l" oder "kg"), "kraftstoff_preis" (Euro-Betrag nur für Kraftstoff), '
+        '"waesche_preis" (Euro-Betrag für Autowäsche, sonst null), '
+        f'"posten" (Liste weiterer bezahlter Fahrzeug-Positionen als {{"art": eine von {", ".join(POSTEN_NAMEN)}, '
+        '"preis": Euro-Betrag}, sonst []), "summe" (Gesamtbetrag), "kilometerstand" (ganze Zahl oder null). '
+        "Unbekannte Werte als null, keine 0-Beträge erfinden. "
+        f"Bekannte Kennzeichen-Endziffern: {endziffern}."
+    )
+    if text:
+        prompt += f"\n\nOCR-Text (kann Fehler enthalten):\n{text}"
+    return prompt
+
 
 def ollama_extract(text: str, fahrzeuge: FahrzeugListe, url: str = OLLAMA_URL,
                    model: str = OLLAMA_MODEL, timeout: int = 180) -> BelegDaten:
-    endziffern = ", ".join(str(f.endziffer) for f in fahrzeuge.fahrzeuge if f.endziffer not in (0, None))
-    prompt = (
-        "Du liest den OCR-Text eines deutschen Tankbelegs. Antworte NUR mit JSON mit den Schlüsseln "
-        '"kennzeichen" (z. B. "GE EL 545E"), "datum" (TT.MM.JJJJ), "menge" (Liter oder kg als Zahl), '
-        '"einheit" ("l" oder "kg"), "kraftstoff_preis" (Euro-Betrag nur für Kraftstoff), '
-        '"waesche_preis" (Euro-Betrag für Autowäsche, sonst null), "kilometerstand" (ganze Zahl oder null). '
-        f"Unbekannte Werte als null. Gültige Kennzeichen-Endziffern: {endziffern}.\n\nOCR-Text:\n{text}"
-    )
-    body = json.dumps({"model": model, "prompt": prompt, "stream": False, "format": "json",
-                       "options": {"temperature": 0}}).encode()
-    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    data = json.loads(payload.get("response") or "{}")
-    return _from_llm(data, fahrzeuge)
+    import ki_anbieter
+    return ki_anbieter.frage_ki(ki_anbieter.KiEinstellung("ollama", model, url=url, bild=False),
+                                text, None, fahrzeuge, timeout)
 
 
 def _num(value):
@@ -540,11 +660,26 @@ def _from_llm(data: dict, fahrzeuge: FahrzeugListe) -> BelegDaten:
             out.fahrzeug, _ = fahrzeuge.match_token(str(kz).split()[-1])
     if data.get("datum"):
         out.datum = parse_date(str(data["datum"]))
-    out.menge = _num(data.get("menge"))
+    out.menge = _num(data.get("menge")) or None
     if out.menge is not None:
         out.einheit = "kg" if str(data.get("einheit", "")).lower().startswith("k") else "l"
     out.kraftstoff_preis = _num(data.get("kraftstoff_preis"))
-    out.waesche_preis = _num(data.get("waesche_preis"))
+    out.waesche_preis = _num(data.get("waesche_preis")) or None
+    out.summe = _num(data.get("summe")) or None
+    summen: dict[str, float] = {}
+    for p in data.get("posten") or []:
+        if not isinstance(p, dict):
+            continue
+        preis = _num(p.get("preis"))
+        art = posten_art(str(p.get("art", ""))) or next(
+            (a for a in POSTEN_NAMEN if a.lower() == str(p.get("art", "")).strip().lower()), None)
+        if not preis or preis <= 0 or art is None:
+            continue
+        if art == WAESCHE:
+            out.waesche_preis = round((out.waesche_preis or 0) + preis, 2)
+        else:
+            summen[art] = round(summen.get(art, 0) + preis, 2)
+    out.posten = tuple(summen.items())
     km = _num(data.get("kilometerstand"))
     out.kilometerstand = int(km) if km else None
     return out
@@ -552,27 +687,47 @@ def _from_llm(data: dict, fahrzeuge: FahrzeugListe) -> BelegDaten:
 
 # ---------------------------------------------------------------- Ablauf je Beleg
 
-def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ollama: bool,
+def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
               log=lambda msg: None) -> BelegDaten:
+    """ki: None/False = nur OCR, True = Ollama (Standard), sonst ki_anbieter.KiEinstellung."""
+    import ki_anbieter
     if seite.text is not None:
         texts = [seite.text]
         daten = parse_text(seite.text, fahrzeuge)
     else:
         results, texts = ocr_image(seite.image, fahrzeuge, lang)
         daten = combine(results)
-    fehlt = daten.fehlende_pflichtfelder()
-    if ollama and (fehlt or daten.kilometerstand is None or any(h.startswith("OCR unsicher") for h in daten.hinweise)):
-        log(f"{seite.name}: frage Ollama ({OLLAMA_MODEL}) ...")
+    ki = ki_anbieter.KiEinstellung.aus_wert(ki)
+    rest = daten.rest()
+    unklar = (daten.fehlende_pflichtfelder() or daten.kilometerstand is None or (rest is not None and abs(rest) > 0.02)
+              or any(h.startswith("OCR unsicher") for h in daten.hinweise))
+    if ki.aktiv and unklar:
+        bild = seite.image if ki.bild else None
+        log(f"{seite.name}: frage {ki.beschreibung()}{' mit Seitenbild' if bild is not None else ''} ...")
         try:
-            llm = ollama_extract(max(texts, key=len), fahrzeuge)
-            ergaenzt = []
-            for name in ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
-                         "kilometerstand"):
-                if getattr(daten, name) is None and getattr(llm, name) is not None:
-                    setattr(daten, name, getattr(llm, name))
-                    ergaenzt.append(name)
-            if ergaenzt:
-                daten.hinweise.append("Ollama ergänzt: " + ", ".join(ergaenzt))
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            daten.hinweise.append(f"Ollama nicht erreichbar/fehlerhaft: {exc}")
+            llm = ki_anbieter.frage_ki(ki, max(texts, key=len), bild, fahrzeuge)
+        except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+            daten.hinweise.append(f"KI ({ki.beschreibung()}) nicht erreichbar/fehlerhaft: {exc}")
+            return daten
+        ergaenzt, korrigiert = [], []
+        for name in ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
+                     "kilometerstand", "summe"):
+            alt, neu = getattr(daten, name), getattr(llm, name)
+            if neu is None:
+                continue
+            if alt is None:
+                setattr(daten, name, neu)
+                ergaenzt.append(name)
+            elif neu != alt and any(h.startswith(f"OCR unsicher bei {name}:") for h in daten.hinweise):
+                setattr(daten, name, neu)
+                korrigiert.append(f"{name} {_fmt(alt)} -> {_fmt(neu)}")
+        vorhanden = {a for a, _ in daten.posten}
+        dazu = tuple(p for p in llm.posten if p[0] not in vorhanden)
+        if dazu:
+            daten.posten += dazu
+            ergaenzt.append("posten " + _fmt(dazu))
+        if ergaenzt:
+            daten.hinweise.append("KI ergänzt: " + ", ".join(ergaenzt))
+        if korrigiert:
+            daten.hinweise.append("KI korrigiert unsichere OCR: " + ", ".join(korrigiert))
     return daten

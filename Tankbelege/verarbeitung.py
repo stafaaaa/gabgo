@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 import belege_core as bc
-from excel_vorlage import WAESCHE, ExcelVorlage, VorlagenFehler, Zeile
+import ki_anbieter
+from excel_vorlage import SHEET_LISTE, WAESCHE, ExcelVorlage, VorlagenFehler, Zeile
 
 
 @dataclass
@@ -24,6 +25,7 @@ class Ergebnis:
     uebersprungen: int = 0
     angehaengt: bool = False
     seiten_je_datei: dict[Path, int] = field(default_factory=dict)
+    neue_fahrzeuge: list = field(default_factory=list)
 
     def zaehlung(self, pdf: bool) -> tuple[int, int]:
         """(Dateien, Seiten) für PDFs bzw. Bilddateien."""
@@ -46,7 +48,8 @@ class Ergebnis:
             f"Neu in Ziel-Excel:         {len(nummern)} Zeilen{bereich}",
             f"Duplikate übersprungen:    {self.duplikate}",
             f"Nicht übernommen:          {self.uebersprungen}",
-        ]
+        ] + ([f"Neue Fahrzeuge angelegt:   {', '.join(str(f.endziffer) for f in self.neue_fahrzeuge)}"]
+             if self.neue_fahrzeuge else [])
 
 
 def pruefung_pfad(ziel: Path) -> Path:
@@ -90,6 +93,24 @@ def _ziel_sperre(ziel: Path, log):
         sperre.unlink(missing_ok=True)
 
 
+def pruefe_ziel_frei(ziel: Path):
+    """Bricht ab, wenn die Ziel-Datei gerade in Excel/LibreOffice geöffnet ist."""
+    if not ziel.exists():
+        return
+    meldung = (f"{ziel.name} ist gerade in Excel (oder einem anderen Programm) geöffnet. "
+               "Bitte die Datei schließen und den Import erneut starten – es wurde nichts geschrieben.")
+    try:
+        with open(ziel, "r+b"):
+            pass
+    except PermissionError:
+        raise VorlagenFehler(meldung) from None
+    besitzer = [ziel.with_name(".~lock." + ziel.name + "#")]  # LibreOffice
+    if os.name != "nt":  # unter Windows sperrt Excel die Datei selbst, ~$-Reste nach Absturz sind harmlos
+        besitzer += [ziel.with_name("~$" + ziel.name), ziel.with_name("~$" + ziel.name[2:])]
+    if any(b.exists() for b in besitzer):
+        raise VorlagenFehler(meldung)
+
+
 def zeilen_aus_beleg(daten: bc.BelegDaten, quelle: str) -> list[Zeile]:
     endziffer = daten.fahrzeug.endziffer
     zeilen = []
@@ -98,10 +119,13 @@ def zeilen_aus_beleg(daten: bc.BelegDaten, quelle: str) -> list[Zeile]:
                             daten.kilometerstand, quelle))
     if daten.hat_waesche:
         zeilen.append(Zeile(endziffer, daten.datum, WAESCHE, daten.waesche_preis, None, quelle))
+    for art, preis in daten.posten:
+        if preis and preis > 0:
+            zeilen.append(Zeile(endziffer, daten.datum, art, preis, None, quelle))
     return zeilen
 
 
-def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = False,
+def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki=None,
                 fortschritt=lambda aktuell, gesamt, text: None, log=lambda msg: None) -> Ergebnis:
     vorlage, belege_ordner, ziel = Path(vorlage), Path(belege_ordner), Path(ziel)
     if ziel.suffix.lower() != ".xlsx":
@@ -110,15 +134,17 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
         raise VorlagenFehler("Ziel-Datei darf nicht die Originalvorlage sein.")
     if not belege_ordner.is_dir():
         raise VorlagenFehler(f"Belege-Ordner nicht gefunden: {belege_ordner}")
+    ki = ki_anbieter.KiEinstellung.aus_wert(ki)
 
     with _ziel_sperre(ziel, log) as lebenszeichen:
+        pruefe_ziel_frei(ziel)
         def melden(aktuell, gesamt, text):
             lebenszeichen()
             fortschritt(aktuell, gesamt, text)
-        return _verarbeiten(vorlage, belege_ordner, ziel, ollama, melden, log)
+        return _verarbeiten(vorlage, belege_ordner, ziel, ki, melden, log)
 
 
-def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
+def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter.KiEinstellung,
                  fortschritt, log) -> Ergebnis:
     anhaengen = ziel.exists()
     if anhaengen:
@@ -127,8 +153,13 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
         except (VorlagenFehler, KeyError, zipfile.BadZipFile) as exc:
             raise VorlagenFehler(f"Bestehende Ziel-Datei {ziel.name} passt nicht zur Vorlage: {exc}") from exc
         log(f"{ziel.name} existiert – neue Einträge werden unten angehängt.")
+        try:  # Fahrzeuge, die nur in der (neueren) festen Vorlage stehen, mit Kennzeichen/Fahrer übernehmen
+            excel.fahrzeuge.reserve = ExcelVorlage(vorlage).fahrzeuge
+        except Exception:
+            pass
     else:
         excel = ExcelVorlage(vorlage)
+    excel.fahrzeuge.neu_erlaubt = True
     ergebnis = Ergebnis(ziel=ziel, pruefung=pruefung_pfad(ziel), angehaengt=anhaengen)
     hinweise = ergebnis.hinweise
 
@@ -156,7 +187,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
             ergebnis.uebersprungen += 1
             continue
         try:
-            daten = bc.auswerten(seite, excel.fahrzeuge, lang, ollama, log)
+            daten = bc.auswerten(seite, excel.fahrzeuge, lang, ki, log)
         except Exception as exc:  # einzelner defekter Beleg darf den Lauf nicht abbrechen
             hinweise.append(f"{seite.name}: Fehler beim Lesen – {exc}")
             ergebnis.uebersprungen += 1
@@ -164,19 +195,27 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
         for h in daten.hinweise:
             hinweise.append(f"{seite.name}: {h}")
         fehlt = daten.fehlende_pflichtfelder()
-        if daten.fahrzeug is None or daten.datum is None or (not daten.hat_kraftstoff and not daten.hat_waesche):
+        if daten.fahrzeug is None or daten.datum is None or not zeilen_aus_beleg(daten, seite.quelle):
             roh = f" (gelesen: '{daten.kennzeichen_roh}')" if daten.kennzeichen_roh and daten.fahrzeug is None else ""
-            hinweise.append(f"{seite.name}: NICHT übernommen – fehlt: {', '.join(fehlt)}{roh}. "
-                            f"Erkannt: {_kurz(daten)}")
+            betrag = f" Bezahlter Betrag laut Beleg: {_eur(daten.summe)} – bitte von Hand eintragen." \
+                if daten.summe else ""
+            hinweise.append(f"{seite.name}: NICHT übernommen – fehlt: {', '.join(fehlt) or 'eindeutige Position'}"
+                            f"{roh}. Erkannt: {_kurz(daten)}.{betrag}")
             ergebnis.uebersprungen += 1
             continue
         if fehlt:
             hinweise.append(f"{seite.name}: übernommen, aber bitte prüfen – fehlt: {', '.join(fehlt)}")
         if daten.hat_kraftstoff and daten.kilometerstand is None:
             hinweise.append(f"{seite.name}: Kilometerstand nicht erkannt.")
-        if (daten.summe is not None and daten.kraftstoff_preis is not None
-                and abs(daten.summe - daten.kraftstoff_preis - (daten.waesche_preis or 0)) > 0.02):
-            hinweise.append(f"{seite.name}: Summe {daten.summe:.2f} passt nicht zu Kraftstoff + Wäsche – bitte prüfen.")
+        rest = daten.rest()
+        if rest is not None and rest > 0.02:
+            hinweise.append(f"{seite.name}: Summe {_eur(daten.summe)}, erfasst {_eur(daten.erfasst())} – "
+                            f"{_eur(rest)} keiner Position zugeordnet, bitte prüfen.")
+        elif rest is not None and rest < -0.02:
+            hinweise.append(f"{seite.name}: erfasste Positionen ({_eur(daten.erfasst())}) übersteigen die Summe "
+                            f"{_eur(daten.summe)} – bitte prüfen.")
+        neu_angelegt = daten.fahrzeug.neu and daten.fahrzeug not in ergebnis.neue_fahrzeuge
+        vorher = len(neue)
         for z in zeilen_aus_beleg(daten, seite.quelle):
             if z.preis is None and z.key()[:3] in nachgetragen:
                 ergebnis.duplikate += 1
@@ -189,12 +228,18 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
                 continue
             gesehen.add(z.key())
             neue.append(z)
+        if neu_angelegt and len(neue) > vorher:
+            fz = daten.fahrzeug
+            ergebnis.neue_fahrzeuge.append(fz)
+            hinweise.append(f"{seite.name}: Fahrzeug {fz.endziffer} ({fz.kennzeichen or 'Kennzeichen unbekannt'}) "
+                            f"stand nicht in '{SHEET_LISTE}' – neu angelegt, Fahrer: {fz.fahrer or 'leer'}.")
         log(f"{seite.name}: {_kurz(daten)}")
     fortschritt(gesamt, gesamt, "Schreibe Excel ...")
 
-    nummern = excel.speichern(ziel, neue, anhaengen=anhaengen)
+    pruefe_ziel_frei(ziel)
+    nummern = excel.speichern(ziel, neue, anhaengen=anhaengen, neue_fahrzeuge=ergebnis.neue_fahrzeuge)
     ergebnis.zeilen = list(zip(nummern, neue))
-    _schreibe_pruefung(ergebnis, vorlage, belege_ordner, ollama)
+    _schreibe_pruefung(ergebnis, vorlage, belege_ordner, ki)
     fortschritt(gesamt, gesamt, "Fertig")
     return ergebnis
 
@@ -204,8 +249,11 @@ def _kurz(d: bc.BelegDaten) -> str:
              f"Datum {d.datum.strftime('%d.%m.%Y') if d.datum else '?'}"]
     if d.menge is not None:
         teile.append(f"{d.menge:.2f} {'kg' if d.einheit == 'kg' else 'l'} / {_eur(d.kraftstoff_preis)}")
-    if d.waesche_preis is not None:
+    if d.hat_waesche:
         teile.append(f"Wäsche {_eur(d.waesche_preis)}")
+    teile += [f"{art} {_eur(preis)}" for art, preis in d.posten]
+    if d.summe is not None:
+        teile.append(f"Summe {_eur(d.summe)}")
     teile.append(f"km {d.kilometerstand if d.kilometerstand is not None else '-'}")
     return ", ".join(teile)
 
@@ -220,13 +268,13 @@ def _zeile_text(z: Zeile) -> str:
             f"{z.kilometerstand if z.kilometerstand is not None else ''}")
 
 
-def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ollama: bool):
+def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ki: ki_anbieter.KiEinstellung):
     lines = [
         f"Prüfprotokoll Tankbelege – {datetime.now():%d.%m.%Y %H:%M}",
         f"Vorlage:      {vorlage}",
         f"Belege:       {ordner}",
         f"Ergebnis:     {e.ziel}" + ("  (an bestehende Datei angehängt)" if e.angehaengt else ""),
-        f"Ollama:       {'an' if ollama else 'aus'}",
+        f"KI:           {ki.beschreibung()}",
         "",
         "Zusammenfassung:",
         *[f"  {z}" for z in e.zusammenfassung()],

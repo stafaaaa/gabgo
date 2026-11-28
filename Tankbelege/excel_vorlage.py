@@ -91,6 +91,7 @@ class ExcelVorlage:
                 raise VorlagenFehler(f"Blatt '{needed}' fehlt in der Vorlage.")
         self.sheet_index = names.index(SHEET_EINTRAG) + 1
         self.sheet_part = dict(sheets)[SHEET_EINTRAG]
+        self.liste_part = dict(sheets)[SHEET_LISTE]
         self.table_part = None
         for target in self._rels(self.sheet_part).values():
             if "/tables/" in target:
@@ -134,14 +135,18 @@ class ExcelVorlage:
         return self.fahrzeuge.keys.get(FahrzeugListe._norm(value))
 
     # ---------------------------------------------------------- Schreiben
-    def speichern(self, ziel: Path, zeilen: list[Zeile], anhaengen: bool = False) -> list[int]:
-        """anhaengen=True: self.path ist eine bereits erzeugte Ausgabe und wird fortgeschrieben."""
+    def speichern(self, ziel: Path, zeilen: list[Zeile], anhaengen: bool = False,
+                  neue_fahrzeuge: list[Fahrzeug] = ()) -> list[int]:
+        """anhaengen=True: self.path ist eine bereits erzeugte Ausgabe und wird fortgeschrieben.
+        neue_fahrzeuge werden am Ende von "Liste KfZ_Fahrer" ergänzt."""
         ziel = Path(ziel)
         if ziel.suffix.lower() != ".xlsx":
             raise VorlagenFehler("Ziel muss eine .xlsx-Datei sein.")
         if ziel.resolve() == self.path.resolve() and not anhaengen:
             raise VorlagenFehler("Die Originalvorlage darf nicht überschrieben werden.")
         parts = dict(self.parts)
+        strings = _SharedStrings(parts.get(self.shared_part)) if self.shared_part else None
+        liste_ende = self._liste_erweitern(parts, list(neue_fahrzeuge), strings) if neue_fahrzeuge else 0
         sheet = parts[self.sheet_part].decode("utf-8")
 
         rows = {int(m.group(1)): m for m in ROW_RE.finditer(sheet)}
@@ -170,7 +175,6 @@ class ExcelVorlage:
             m = rows[n]
             sheet = sheet[:m.start()] + sheet[m.end():]
 
-        strings = _SharedStrings(parts.get(self.shared_part)) if self.shared_part else None
         date_style = self._date_style(parts)
         new_xml, numbers = [], []
         for i, z in enumerate(zeilen):
@@ -209,9 +213,9 @@ class ExcelVorlage:
             sheet = sheet.replace("<sheetData/>", "<sheetData>" + "".join(new_xml) + "</sheetData>", 1)
         sheet = re.sub(r'(<dimension ref=")[^"]*(")', lambda m: m.group(1) + _dimension(m.group(0), last) + m.group(2),
                        sheet, 1)
-        parts[self.sheet_part] = sheet.encode("utf-8")
+        parts[self.sheet_part] = _bereich_erweitern(sheet, liste_ende).encode("utf-8")
 
-        table = parts[self.table_part].decode("utf-8")
+        table = _bereich_erweitern(parts[self.table_part].decode("utf-8"), liste_ende)
         new_ref = f"A1:G{last}"
         table = re.sub(r'(<table\b[^>]*?\sref=")[^"]*(")', rf"\g<1>{new_ref}\g<2>", table, 1)
         table = re.sub(r'(<autoFilter\b[^>]*?\sref=")[^"]*(")', rf"\g<1>{new_ref}\g<2>", table, 1)
@@ -228,10 +232,14 @@ class ExcelVorlage:
             parts["xl/workbook.xml"] = wb.encode("utf-8")
 
         ziel.parent.mkdir(parents=True, exist_ok=True)
-        tmp = ziel.with_suffix(".tmp")
-        with zipfile.ZipFile(tmp, "w") as z:
-            for info in self.infos:
-                z.writestr(info, parts[info.filename], compress_type=info.compress_type)
+        tmp = ziel.with_name(ziel.name + ".tmp")
+        try:
+            with zipfile.ZipFile(tmp, "w") as z:
+                for info in self.infos:
+                    z.writestr(info, parts[info.filename], compress_type=info.compress_type)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         try:
             tmp.replace(ziel)
         except PermissionError:
@@ -239,12 +247,59 @@ class ExcelVorlage:
             raise VorlagenFehler(f"{ziel.name} ist gesperrt (in Excel geöffnet?) – bitte schließen und erneut starten.")
         return numbers
 
-    def _value_cell(self, ref: str, value, strings) -> str:
+    def _liste_erweitern(self, parts, fahrzeuge: list[Fahrzeug], strings) -> int:
+        """Neue Fahrzeuge unter die letzte belegte Zeile von "Liste KfZ_Fahrer" schreiben; gibt letzte Zeile zurück."""
+        xml = parts[self.liste_part].decode("utf-8")
+        rows = {int(m.group(1)): m for m in ROW_RE.finditer(xml)}
+        belegt = [n for n, m in rows.items() if re.search(r"<v>|<is>", m.group(0))]
+        letzte = max(belegt + [1])
+        muster = rows[letzte].group(0) if letzte in rows and letzte > 1 else ""
+        stile = {m.group(1): (re.search(r'\ss="\d+"', m.group(3)) or [""])[0] for m in CELL_RE.finditer(muster)}
+        attrs = ""
+        if muster:
+            attrs = " ".join(a for a in re.findall(r'[\w:]+="[^"]*"', re.match(r"<row ([^>]*?)/?>", muster).group(1))
+                             if a.split("=")[0] in ("spans", "x14ac:dyDescent", "ht", "customHeight"))
+        ende = letzte + len(fahrzeuge)
+        for n in sorted((n for n in rows if letzte < n <= ende), reverse=True):  # leere, nur formatierte Zeilen
+            xml = xml[:rows[n].start()] + xml[rows[n].end():]
+        neu = []
+        for i, fz in enumerate(fahrzeuge, 1):
+            n = letzte + i
+            zellen = [self._value_cell(f"A{n}", fz.endziffer, strings, stile.get("A", ""))]
+            if fz.kennzeichen:
+                zellen.append(self._value_cell(f"B{n}", fz.kennzeichen, strings, stile.get("B", "")))
+            if fz.fahrer:
+                zellen.append(self._value_cell(f"C{n}", fz.fahrer, strings, stile.get("C", "")))
+            neu.append(f'<row r="{n}"{" " + attrs if attrs else ""}>' + "".join(zellen) + "</row>")
+        danach = next((m for m in ROW_RE.finditer(xml) if int(m.group(1)) > ende), None)
+        if danach:
+            xml = xml[:danach.start()] + "".join(neu) + xml[danach.start():]
+        elif "</sheetData>" in xml:
+            xml = xml.replace("</sheetData>", "".join(neu) + "</sheetData>", 1)
+        else:
+            xml = xml.replace("<sheetData/>", "<sheetData>" + "".join(neu) + "</sheetData>", 1)
+
+        def dim(m):
+            z = re.search(r"([A-Z]+)(\d+)$", m.group(2))
+            if not z:
+                return m.group(0)
+            return f'{m.group(1)}{m.group(2)[:z.start()]}{z.group(1)}{max(int(z.group(2)), ende)}"'
+        xml = re.sub(r'(<dimension ref=")([^"]*)"', dim, xml, 1)
+        parts[self.liste_part] = xml.encode("utf-8")
+        for target in self._rels(self.liste_part).values():
+            if "/tables/" in target and target in parts:
+                t = parts[target].decode("utf-8")
+                for tag in ("table", "autoFilter"):
+                    t = re.sub(rf'(<{tag}\b[^>]*?\sref=")([^"]*)"', dim, t, 1)
+                parts[target] = t.encode("utf-8")
+        return ende
+
+    def _value_cell(self, ref: str, value, strings, style: str = "") -> str:
         if isinstance(value, str):
             if strings is None:
-                return f'<c r="{ref}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
-            return f'<c r="{ref}" t="s"><v>{strings.index(value)}</v></c>'
-        return f'<c r="{ref}"><v>{_num(value)}</v></c>'
+                return f'<c r="{ref}"{style} t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+            return f'<c r="{ref}"{style} t="s"><v>{strings.index(value)}</v></c>'
+        return f'<c r="{ref}"{style}><v>{_num(value)}</v></c>'
 
     def _date_style(self, parts) -> int:
         if not self.styles_part:
@@ -275,6 +330,16 @@ def _col_nr(col: str) -> int:
 def _fremde_zellen(row_xml: str) -> list[str]:
     """Zellen rechts der Tabelle (ab Spalte H) – gehören nicht zu Tabelle6."""
     return [m.group(0) for m in CELL_RE.finditer(row_xml) if _col_nr(m.group(1)) > 7]
+
+
+LISTE_BEREICH = re.compile(r"((?:'|&apos;)?Liste KfZ_Fahrer(?:'|&apos;)?!\$?A\$?2:\$?C\$?)(\d+)")
+
+
+def _bereich_erweitern(xml: str, letzte_zeile: int) -> str:
+    """SVERWEIS-Bereiche auf "Liste KfZ_Fahrer" mindestens bis letzte_zeile reichen lassen."""
+    if not letzte_zeile:
+        return xml
+    return LISTE_BEREICH.sub(lambda m: m.group(1) + str(max(int(m.group(2)), letzte_zeile)), xml)
 
 
 def _dimension(tag: str, last_row: int) -> str:

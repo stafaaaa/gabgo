@@ -9,7 +9,8 @@ Zeilen an `Tabelle6` im Blatt „Eintragungen“ einer Kopie der Excel-Vorlage a
   neben den Ordner `Belege` legen und starten.
 * **Python:** `start.bat` doppelklicken – legt beim ersten Start `.venv` an und installiert die Pakete
   aus `requirements.txt` (Python 3.10+ nötig).
-* **Kommandozeile:** `python tankbelege_app.py --cli --vorlage "Tanken_neu - Kopie.xlsx" --belege Belege --ziel Tanken_2026_11.xlsx [--ollama]`
+* **Kommandozeile:** `python tankbelege_app.py --cli --vorlage "Tanken_neu - Kopie.xlsx" --belege Belege --ziel Tanken_2026_11.xlsx [--ki openrouter --modell ... --api-key ...]`
+  (ohne `--ki` gilt der in der Oberfläche gespeicherte Anbieter; Key alternativ über `TANKBELEGE_API_KEY`)
 
 Voraussetzung für Bild-Scans: Tesseract unter `C:\Program Files\Tesseract-OCR\tesseract.exe`
 (am besten mit Sprachpaket *Deutsch*; anderer Pfad über Umgebungsvariable `TESSERACT_CMD`).
@@ -25,9 +26,20 @@ und sonst die in die EXE eingebettete Kopie. Eine andere Vorlage geht nur noch p
    (PyMuPDF), sonst per Tesseract mit mehreren Bildaufbereitungen; je Feld entscheidet die Mehrheit.
 2. Das Kennzeichen wird gegen „Liste KfZ_Fahrer“ abgeglichen, mit OCR-Toleranz
    (`GE EL 5456` → `545E`, `GF FL 170` → `170`, `1O03` → `1003`).
-3. Kraftstoff (Liter/kg) **und** Wäsche auf einem Beleg ergeben zwei Zeilen:
-   `Endziffer | Datum | Liter | Kraftstoffpreis | km` und `Endziffer | Datum | Wäsche | Waschpreis | (leer)`.
-4. Optional ergänzt ein lokales Ollama (`llama3.2:latest`) fehlende oder unsichere Felder.
+   Steht ein Fahrzeug noch nicht in der Liste, wird es am Ende von „Liste KfZ_Fahrer“ angelegt
+   (Endziffer, Kennzeichen falls erkannt, Fahrer „Neu“; beim Anhängen mit Kennzeichen/Fahrer aus der festen
+   Vorlage, falls es dort steht). Die SVERWEIS-Bereiche in B/C werden bei Bedarf erweitert; das
+   Prüfprotokoll vermerkt die Neuanlage.
+3. Jede bezahlte Position wird eine eigene Zeile `Endziffer | Datum | Liter-Spalte | Preis`:
+   Kraftstoff inkl. Gas (CNG, Bio-CNG, Erdgas, LPG/Autogas) mit Menge in l oder kg und Kilometerstand,
+   außerdem `Wäsche`, `AdBlue`, `Pflege` (Innenreinigung, Staubsauger, Autopflege), `Wischwasser`,
+   `Motoröl` und `Zubehör` mit Bezeichnung statt Menge. Wäsche mit 0,00 € oder ohne Preis ergibt keine Zeile.
+   Passt die Summe nicht zu den erfassten Positionen, steht der Restbetrag mit Seite im Prüfprotokoll.
+4. Optional ergänzt eine KI fehlende oder unsichere Felder. Auswahl in der Oberfläche: Aus (nur OCR),
+   Ollama (lokal), OpenRouter (Standard `anthropic/claude-haiku-5.5`), OpenAI, Gemini oder Anthropic direkt.
+   Mit „Seitenbild senden“ bekommt ein Vision-Modell das Belegbild, der OCR-Text geht als Hilfe mit.
+   Anbieter, Modell und API-Key werden in `%APPDATA%\Tankbelege\einstellungen.json` gespeichert,
+   der Key per Windows-DPAPI an das Benutzerkonto gebunden verschlüsselt.
 5. Bereits vorhandene Einträge (Endziffer, Datum, Liter, Preis) werden übersprungen.
 
 ## Excel-Regeln
@@ -40,6 +52,8 @@ Hinweise und Fehler stehen ausschließlich in `<Ziel>_pruefung.txt` (beim Anhän
 Während eines Imports liegt neben der Ziel-Datei eine Sperrdatei `<Ziel>.xlsx.lock`. Ein zweiter Import in
 dieselbe Datei bricht dann mit einem Hinweis ab, statt Einträge zu überschreiben. Eine von einem abgestürzten
 Import liegen gebliebene Sperre wird nach 10 Minuten ohne Lebenszeichen automatisch entfernt.
+Ist die Ziel-Datei in Excel oder LibreOffice geöffnet, bricht der Import vor dem Lesen und noch einmal vor dem
+Schreiben mit einem Hinweis ab; die Datei wird über eine temporäre Kopie ersetzt und nie halb geschrieben.
 
 ## Tests
 
