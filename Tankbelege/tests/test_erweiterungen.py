@@ -379,7 +379,7 @@ def test_pruefhinweis_in_spalte_h_und_gelb(tmp_path):
     assert zeile[0] == 1800 and zeile[4] == 40.0 and zeile[5] == 70.0 and zeile[6] is None
     assert zeile[7] == "* Bitte prüfen/vervollständigen: Handschrift/km fehlt oder unleserlich (a.pdf, Seite 1)"
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
-    assert ws["H1"].value == "Prüfhinweis" and ws.tables["Tabelle6"].ref == "A1:G3"
+    assert ws["H1"].value == "Prüfhinweis" and ws.tables["Tabelle6"].ref == "A1:H3"
     regeln = [r for cf in ws.conditional_formatting for r in cf.rules]
     assert [r.formula for r in regeln] == [['LEFT($H3,1)="*"']]
     assert regeln[0].dxf.fill.bgColor.rgb == "FFFFF2CC"
@@ -397,7 +397,13 @@ def test_vollstaendiger_beleg_ohne_pruefhinweis(tmp_path):
     verarbeiten(VORLAGE, belege, ziel)
     assert _eintragungen(ziel)[0][7] is None
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
-    assert ws["H1"].value is None and not list(ws.conditional_formatting)
+    assert ws["H1"].value == "Prüfhinweis" and len(list(ws.conditional_formatting)) == 1
+    t = ws.tables["Tabelle6"]
+    assert t.ref == "A1:H3" and [c.name for c in t.tableColumns][-2:] == ["Kilometerstand", "Prüfhinweis"]
+    assert ws["B3"].value.startswith("=VLOOKUP")
+    verarbeiten(VORLAGE, belege, ziel)  # Zieldatei mit 8 Spalten wird weitergeführt
+    t = openpyxl.load_workbook(ziel)["Eintragungen"].tables["Tabelle6"]
+    assert len(t.tableColumns) == 8 and t.tableColumns[-1].id == 8
 
 
 def test_fehlende_endziffer_wird_mit_hinweis_eingetragen(tmp_path):

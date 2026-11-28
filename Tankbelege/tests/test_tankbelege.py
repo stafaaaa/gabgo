@@ -76,10 +76,10 @@ def test_speichern_laesst_vorlage_unveraendert(vorlage, tmp_path):
     wb = openpyxl.load_workbook(ziel)
     assert wb.sheetnames == ["Liste KfZ_Fahrer", "Eintragungen"]
     ws = wb["Eintragungen"]
-    assert ws.tables["Tabelle6"].ref == "A1:G5"
-    assert ws.max_column == 7
+    assert ws.tables["Tabelle6"].ref == "A1:H5"
+    assert ws.max_column == 8
     row2 = [c.value for c in ws[2]]
-    assert row2[0] == 0 and row2[3:] == [None] * 4
+    assert row2[0] == 0 and row2[3:] == [None] * 5
     for r in (3, 4, 5):
         assert ws.cell(r, 2).value == row2[1] and ws.cell(r, 3).value == row2[2]
     assert [ws.cell(4, c).value for c in (1, 5, 6, 7)] == ["545E", "Wäsche", 11.49, None]
@@ -189,7 +189,7 @@ def test_notiz_unterhalb_der_tabelle_bleibt(tmp_path):
     ExcelVorlage(src).speichern(ziel, [Zeile("545E", date(2026, 1, 20), 56.37, 101.41, 11836)])
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
     assert (ws["A3"].value, ws["J3"].value, ws["J10"].value) == ("545E", "Notiz A", "Notiz B")
-    assert ws.tables["Tabelle6"].ref == "A1:G3"
+    assert ws.tables["Tabelle6"].ref == "A1:H3"
     assert not ws.row_dimensions[3].hidden
 
 
@@ -257,7 +257,7 @@ def test_bestehendes_ziel_wird_fortgeschrieben(tmp_path):
     assert VORLAGE.read_bytes() == original
 
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
-    assert ws.tables["Tabelle6"].ref == "A1:G6"
+    assert ws.tables["Tabelle6"].ref == "A1:H6"
     assert [ws.cell(r, 4).value.date() for r in range(3, 7)] == \
         [date(2026, 1, 20)] * 2 + [date(2026, 1, 22)] * 2
     assert ws.cell(5, 2).value == ws.cell(2, 2).value

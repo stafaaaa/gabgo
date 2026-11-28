@@ -108,7 +108,7 @@ class ExcelVorlage:
                 if t.get("name") == TABELLE or t.get("displayName") == TABELLE:
                     self.table_part = target
                     cols = [c.get("name") for c in t.find("m:tableColumns", NS)]
-                    if cols != SPALTEN:
+                    if cols not in (SPALTEN, SPALTEN + [PRUEF_TITEL]):
                         raise VorlagenFehler(f"Spalten von {TABELLE} weichen ab: {cols}")
                     self.table_ref = t.get("ref")
                     if int(t.get("totalsRowCount", "0") or 0) > 0:
@@ -181,7 +181,6 @@ class ExcelVorlage:
         row_attrs = " ".join(a for a in re.findall(r'[\w:]+="[^"]*"', row_attrs)
                              if a.split("=")[0] in ("spans", "x14ac:dyDescent"))
 
-        table_end = int(re.search(r"(\d+)$", self.table_ref).group(1))
         filled = [n for n, m in rows.items() if n >= 2 and _has_values(m.group(0))]
         start = max(filled + [2]) + 1
         # Zeilen unterhalb der Daten: Inhalte außerhalb A:G (z. B. Notizen) bleiben erhalten.
@@ -226,7 +225,7 @@ class ExcelVorlage:
                                  if a.split("=")[0] not in ("r", "spans", "hidden"))
                 new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells + fremd) + "</row>"))
             else:
-                attrs = _spans_bis_h(row_attrs) if z.pruefhinweis else row_attrs
+                attrs = _spans_bis_h(row_attrs)
                 new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells) + "</row>"))
         new_xml += [(n, xml) for n, xml in later.items() if n not in removable]
         new_xml = [xml for _, xml in sorted(new_xml)]
@@ -236,16 +235,14 @@ class ExcelVorlage:
             sheet = sheet.replace("</sheetData>", "".join(new_xml) + "</sheetData>", 1)
         else:
             sheet = sheet.replace("<sheetData/>", "<sheetData>" + "".join(new_xml) + "</sheetData>", 1)
-        pruefung = any(z.pruefhinweis for z in zeilen)
-        if pruefung:
-            sheet = self._pruefspalte(sheet, parts, strings)
+        sheet = self._pruefspalte(sheet, parts, strings)
         sheet = re.sub(r'(<dimension ref=")[^"]*(")',
-                       lambda m: m.group(1) + _dimension(m.group(0), last, "H" if pruefung else "G") + m.group(2),
-                       sheet, 1)
+                       lambda m: m.group(1) + _dimension(m.group(0), last, "H") + m.group(2), sheet, 1)
         parts[self.sheet_part] = _bereich_erweitern(sheet, liste_ende).encode("utf-8")
 
         table = _bereich_erweitern(parts[self.table_part].decode("utf-8"), liste_ende)
-        new_ref = f"A1:G{last}"
+        table = _pruefspalte_in_tabelle(table)
+        new_ref = f"A1:H{last}"
         table = re.sub(r'(<table\b[^>]*?\sref=")[^"]*(")', rf"\g<1>{new_ref}\g<2>", table, 1)
         table = re.sub(r'(<autoFilter\b[^>]*?\sref=")[^"]*(")', rf"\g<1>{new_ref}\g<2>", table, 1)
         parts[self.table_part] = table.encode("utf-8")
@@ -324,7 +321,7 @@ class ExcelVorlage:
         return ende
 
     def _pruefspalte(self, sheet: str, parts, strings) -> str:
-        """Spalte H "Prüfhinweis" neben Tabelle6: Überschrift, Breite und hellgelbe Markierung
+        """Spalte H "Prüfhinweis" als letzte Spalte von Tabelle6: Überschrift, Breite und hellgelbe Markierung
         (bedingte Formatierung, verschwindet, sobald der Hinweis gelöscht wird)."""
         kopf = ROW_RE.search(sheet)
         if kopf and kopf.group(1) == "1" and 'r="H1"' not in kopf.group(0) and kopf.group(0).endswith("</row>"):
@@ -425,6 +422,16 @@ def _bereich_erweitern(xml: str, letzte_zeile: int) -> str:
     if not letzte_zeile:
         return xml
     return LISTE_BEREICH.sub(lambda m: m.group(1) + str(max(int(m.group(2)), letzte_zeile)), xml)
+
+
+def _pruefspalte_in_tabelle(table: str) -> str:
+    """Tabelle6 um die Spalte "Prüfhinweis" erweitern, damit Sortieren und Filtern H mitnehmen."""
+    if f'name="{PRUEF_TITEL}"' in table:
+        return table
+    ids = [int(i) for i in re.findall(r'<tableColumn\b[^>]*?\sid="(\d+)"', table)]
+    spalte = f'<tableColumn id="{max(ids + [0]) + 1}" name="{PRUEF_TITEL}"/>'
+    table = re.sub(r'(<tableColumns\b[^>]*?count=")(\d+)"', lambda m: f'{m.group(1)}{int(m.group(2)) + 1}"', table, 1)
+    return table.replace("</tableColumns>", spalte + "</tableColumns>", 1)
 
 
 def _spans_bis_h(attrs: str) -> str:
