@@ -78,7 +78,7 @@ class App:
         start = Path(self.ziel.get() or self.vorlage.get() or APP_DIR)
         p = filedialog.asksaveasfilename(title="Ziel-Datei", defaultextension=".xlsx",
                                          initialdir=start.parent, initialfile=start.name,
-                                         filetypes=[("Excel", "*.xlsx")])
+                                         filetypes=[("Excel", "*.xlsx")], confirmoverwrite=False)
         if p:
             self.ziel.set(p)
 
@@ -101,8 +101,6 @@ class App:
             self.ziel.set(str(ziel))
         if ziel.resolve() == vorlage.resolve():
             return messagebox.showerror("Fehler", "Die Originalvorlage darf nicht überschrieben werden.")
-        if ziel.exists() and not messagebox.askyesno("Datei existiert", f"{ziel.name} überschreiben?"):
-            return
         self.start_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
         self.progress["value"] = 0
@@ -137,7 +135,8 @@ class App:
                                    f"nicht übernommen: {erg.uebersprungen})")
                     for n, z in erg.zeilen:
                         self._schreibe(f"  Zeile {n}: {_zeile_text(z)}")
-                    self._schreibe(f"Gespeichert: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
+                    modus = "Angehängt an" if erg.angehaengt else "Gespeichert"
+                    self._schreibe(f"{modus}: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
                     self.status.set(f"Fertig – {len(erg.zeilen)} Zeilen, {len(erg.hinweise)} Hinweise")
                     self.start_btn.configure(state="normal")
                     self.open_btn.configure(state="normal")

@@ -228,3 +228,45 @@ def test_abgetrenntes_e_oder_ziffer(vorlage, zeile, erwartet, warnung):
     fz, _, note = vorlage.fahrzeuge.find_in_text(zeile)
     assert fz.endziffer == erwartet
     assert bool(note and "unsicher" in note) == warnung
+
+
+def test_bestehendes_ziel_wird_fortgeschrieben(tmp_path):
+    import pymupdf
+    belege = tmp_path / "Belege"
+    belege.mkdir()
+
+    def beleg(name, text):
+        doc = pymupdf.open()
+        doc.new_page().insert_text((40, 60), text, fontsize=9)
+        doc.save(belege / name)
+
+    beleg("a.pdf", BELEG_TEXT)
+    ziel = tmp_path / "Tanken.xlsx"
+    original = VORLAGE.read_bytes()
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert [n for n, _ in erg.zeilen] == [3, 4] and not erg.angehaengt
+
+    beleg("b.pdf", BELEG_TEXT.replace("20/01/2026", "22/01/2026"))
+    erg2 = verarbeiten(VORLAGE, belege, ziel)
+    assert erg2.angehaengt and erg2.duplikate == 2
+    assert [(n, z.datum) for n, z in erg2.zeilen] == [(5, date(2026, 1, 22)), (6, date(2026, 1, 22))]
+    assert VORLAGE.read_bytes() == original
+
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws.tables["Tabelle6"].ref == "A1:G6"
+    assert [ws.cell(r, 4).value.date() for r in range(3, 7)] == \
+        [date(2026, 1, 20)] * 2 + [date(2026, 1, 22)] * 2
+    assert ws.cell(5, 2).value == ws.cell(2, 2).value
+    protokoll = (tmp_path / "Tanken_pruefung.txt").read_text(encoding="utf-8-sig")
+    assert protokoll.count("Prüfprotokoll Tankbelege") == 2 and "angehängt" in protokoll
+
+    erg3 = verarbeiten(VORLAGE, belege, ziel)
+    assert erg3.zeilen == [] and erg3.duplikate == 4
+
+
+def test_fremde_datei_als_ziel_wird_abgelehnt(tmp_path):
+    ziel = tmp_path / "fremd.xlsx"
+    openpyxl.Workbook().save(ziel)
+    (tmp_path / "Belege").mkdir()
+    with pytest.raises(VorlagenFehler):
+        verarbeiten(VORLAGE, tmp_path / "Belege", ziel)

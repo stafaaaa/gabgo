@@ -1,6 +1,7 @@
 """Ablauf: Belege lesen -> Zeilen bilden -> neue .xlsx + *_pruefung.txt schreiben."""
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ class Ergebnis:
     belege: int = 0
     duplikate: int = 0
     uebersprungen: int = 0
+    angehaengt: bool = False
 
 
 def pruefung_pfad(ziel: Path) -> Path:
@@ -45,8 +47,16 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
     if not belege_ordner.is_dir():
         raise VorlagenFehler(f"Belege-Ordner nicht gefunden: {belege_ordner}")
 
-    excel = ExcelVorlage(vorlage)
-    ergebnis = Ergebnis(ziel=ziel, pruefung=pruefung_pfad(ziel))
+    anhaengen = ziel.exists()
+    if anhaengen:
+        try:
+            excel = ExcelVorlage(ziel)
+        except (VorlagenFehler, KeyError, zipfile.BadZipFile) as exc:
+            raise VorlagenFehler(f"Bestehende Ziel-Datei {ziel.name} passt nicht zur Vorlage: {exc}") from exc
+        log(f"{ziel.name} existiert – neue Einträge werden unten angehängt.")
+    else:
+        excel = ExcelVorlage(vorlage)
+    ergebnis = Ergebnis(ziel=ziel, pruefung=pruefung_pfad(ziel), angehaengt=anhaengen)
     hinweise = ergebnis.hinweise
 
     tesseract = bc.configure_tesseract()
@@ -101,7 +111,7 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
         log(f"{seite.name}: {_kurz(daten)}")
     fortschritt(gesamt, gesamt, "Schreibe Excel ...")
 
-    nummern = excel.speichern(ziel, neue)
+    nummern = excel.speichern(ziel, neue, anhaengen=anhaengen)
     ergebnis.zeilen = list(zip(nummern, neue))
     _schreibe_pruefung(ergebnis, vorlage, belege_ordner, ollama)
     fortschritt(gesamt, gesamt, "Fertig")
@@ -134,7 +144,7 @@ def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ollama: bool):
         f"Prüfprotokoll Tankbelege – {datetime.now():%d.%m.%Y %H:%M}",
         f"Vorlage:      {vorlage}",
         f"Belege:       {ordner}",
-        f"Ergebnis:     {e.ziel}",
+        f"Ergebnis:     {e.ziel}" + ("  (an bestehende Datei angehängt)" if e.angehaengt else ""),
         f"Ollama:       {'an' if ollama else 'aus'}",
         f"Belege gelesen: {e.belege}, neue Zeilen: {len(e.zeilen)}, Duplikate: {e.duplikate}, "
         f"nicht übernommen: {e.uebersprungen}",
@@ -144,4 +154,9 @@ def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ollama: bool):
     lines += [f"  {n:>4} | {_zeile_text(z)} | {z.quelle}" for n, z in e.zeilen] or ["  (keine)"]
     lines += ["", "Hinweise und Fehler:"]
     lines += [f"  - {h}" for h in e.hinweise] or ["  (keine)"]
-    e.pruefung.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    text = "\n".join(lines) + "\n"
+    if e.angehaengt and e.pruefung.exists():
+        with e.pruefung.open("a", encoding="utf-8") as f:
+            f.write("\n" + "=" * 60 + "\n" + text)
+    else:
+        e.pruefung.write_text(text, encoding="utf-8-sig")

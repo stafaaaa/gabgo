@@ -130,11 +130,12 @@ class ExcelVorlage:
         return self.fahrzeuge.keys.get(FahrzeugListe._norm(value))
 
     # ---------------------------------------------------------- Schreiben
-    def speichern(self, ziel: Path, zeilen: list[Zeile]) -> list[int]:
+    def speichern(self, ziel: Path, zeilen: list[Zeile], anhaengen: bool = False) -> list[int]:
+        """anhaengen=True: self.path ist eine bereits erzeugte Ausgabe und wird fortgeschrieben."""
         ziel = Path(ziel)
         if ziel.suffix.lower() != ".xlsx":
             raise VorlagenFehler("Ziel muss eine .xlsx-Datei sein.")
-        if ziel.resolve() == self.path.resolve():
+        if ziel.resolve() == self.path.resolve() and not anhaengen:
             raise VorlagenFehler("Die Originalvorlage darf nicht überschrieben werden.")
         parts = dict(self.parts)
         sheet = parts[self.sheet_part].decode("utf-8")
@@ -227,7 +228,11 @@ class ExcelVorlage:
         with zipfile.ZipFile(tmp, "w") as z:
             for info in self.infos:
                 z.writestr(info, parts[info.filename], compress_type=info.compress_type)
-        tmp.replace(ziel)
+        try:
+            tmp.replace(ziel)
+        except PermissionError:
+            tmp.unlink(missing_ok=True)
+            raise VorlagenFehler(f"{ziel.name} ist gesperrt (in Excel geöffnet?) – bitte schließen und erneut starten.")
         return numbers
 
     def _value_cell(self, ref: str, value, strings) -> str:

@@ -27,9 +27,11 @@ Voraussetzung für Bild-Scans: Tesseract unter `C:\Program Files\Tesseract-OCR\t
 
 ## Excel-Regeln
 
-Die Vorlage wird nie überschrieben. Das Ergebnis ist eine neue `.xlsx`; Blätter, Spalten, Design und
-Zeile 2 bleiben unverändert, B/C erhalten die VLOOKUP-Formeln aus Zeile 2, neue Zeilen beginnen ab Zeile 3.
-Hinweise und Fehler stehen ausschließlich in `<Ziel>_pruefung.txt`.
+Die Vorlage wird nie überschrieben. Gibt es die Ziel-Datei noch nicht, entsteht eine neue `.xlsx` aus der
+Vorlage; Blätter, Spalten, Design und Zeile 2 bleiben unverändert, B/C erhalten die VLOOKUP-Formeln aus
+Zeile 2, neue Zeilen beginnen ab Zeile 3. Existiert die Ziel-Datei bereits, werden neue Einträge unter der
+letzten belegten Zeile angehängt; Einträge, die dort schon stehen, werden übersprungen.
+Hinweise und Fehler stehen ausschließlich in `<Ziel>_pruefung.txt` (beim Anhängen wird das Protokoll ergänzt).
 
 ## Tests
 
