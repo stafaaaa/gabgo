@@ -408,7 +408,10 @@ def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
             # Viele Bons listen eine Position zweimal (Kopf + Artikelzeile): gleicher Betrag zählt einmal
             # gleicher Betrag zählt nur einmal, wenn auch das Produktwort gleich ist
             # ("Wash Glanzwäsche € 11,49" / "0082 Glanzwäsche 11,49"), nicht bei Innenreinigung + Staubsauger
-            woerter = {w.lower() for z in zeilen for w in re.findall(r"[^\W\d_]{4,}", lines[z])}
+            woerter = set()
+            for z in zeilen:
+                ws = [w.lower() for w in re.findall(r"[^\W\d_]+", lines[z])]
+                woerter |= {w for w in ws if len(w) >= 4} | {a + b for a, b in zip(ws, ws[1:])}  # "Ad Blue" = "AdBlue"
             liste = gesehen.setdefault(art, [])
             if not any(v == vals[-1] and w & woerter for v, w in liste):
                 liste.append((vals[-1], woerter))
