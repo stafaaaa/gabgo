@@ -5,6 +5,7 @@ import argparse
 import os
 import queue
 import sys
+import tempfile
 import threading
 import traceback
 from datetime import date
@@ -29,10 +30,8 @@ def _dokumente() -> Path:
 
 def _beschreibbar(ordner: Path) -> bool:
     try:
-        test = ordner / ".schreibtest"
-        test.write_bytes(b"")
-        test.unlink()
-        return True
+        with tempfile.TemporaryFile(dir=ordner):
+            return True
     except OSError:
         return False
 
