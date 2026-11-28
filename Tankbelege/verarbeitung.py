@@ -201,7 +201,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         zeilen = zeilen_aus_beleg(daten, seite.quelle)
         if not zeilen and (daten.fahrzeug is not None or daten.summe):
             zeilen = [Zeile(daten.fahrzeug.endziffer if daten.fahrzeug else None, daten.datum, None,
-                            daten.summe, None, seite.quelle)]
+                            daten.summe, daten.kilometerstand, seite.quelle)]
         if not zeilen:
             roh = f" (gelesen: '{daten.kennzeichen_roh}')" if daten.kennzeichen_roh and daten.fahrzeug is None else ""
             betrag = f" Bezahlter Betrag laut Beleg: {_eur(daten.summe)} – bitte von Hand eintragen." \
@@ -264,9 +264,10 @@ def _unvollstaendig(z: Zeile) -> bool:
 
 def _teil_gleich(neu: tuple, alt: tuple) -> bool:
     """Unvollständiger Eintrag gilt als vorhanden, wenn ein Eintrag in allen erkannten Feldern übereinstimmt
-    (z. B. nachdem die fehlende Endziffer von Hand ergänzt wurde)."""
-    if neu[1] is None and neu[3] is None:
-        return False
+    (z. B. nachdem die fehlende Endziffer von Hand ergänzt wurde). Ohne Datum zählt nur ein gleicher
+    unvollständiger Eintrag, sonst würden gleich teure Belege anderer Tage verschluckt."""
+    if neu[1] is None:
+        return neu == alt
     return all(n in (None, "") or n == a for n, a in zip(neu, alt))
 
 
@@ -305,6 +306,8 @@ def _mit_pruefhinweis(daten: bc.BelegDaten, zeilen: list[Zeile]) -> list[Zeile]:
                 gruende.append("Handschrift/km unsicher")
         elif z.liter == WAESCHE and "waesche_preis" in unsicher:
             gruende.append("Preis unsicher")
+        elif z.liter != WAESCHE and "posten" in unsicher:
+            gruende.append("Zusatzposition unsicher")
         if i == 0 and z.liter is not None and rest is not None and abs(rest) > 0.02:
             gruende.append(f"{_eur(rest)} keiner Position zugeordnet" if rest > 0
                            else "Positionen übersteigen die Summe")

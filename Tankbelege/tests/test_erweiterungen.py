@@ -424,3 +424,35 @@ def test_nur_summe_erkannt_wird_mit_hinweis_eingetragen(tmp_path):
     (zeile,) = _eintragungen(ziel)
     assert zeile[0] == 1800 and zeile[4] is None and zeile[5] == 23.4
     assert "Position unklar, nur Summe erkannt" in zeile[7]
+
+
+def test_ohne_datum_kein_teilabgleich_mit_anderem_tag(tmp_path):
+    import verarbeitung as v
+    assert not v._teil_gleich(("1800", None, "Wäsche", 11.49), ("1800", date(2026, 1, 5), "Wäsche", 11.49))
+    assert v._teil_gleich(("1800", None, None, None), ("1800", None, None, None))
+    assert v._teil_gleich(("", date(2026, 1, 5), "Wäsche", 11.49), ("1800", date(2026, 1, 5), "Wäsche", 11.49))
+
+
+def test_ohne_datum_und_preis_kein_erneuter_eintrag(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Diesel 40,00 l\nKennzeichen GE EL 1800\nKilometerstand 5000")
+    ziel = tmp_path / "z.xlsx"
+    assert len(verarbeiten(VORLAGE, belege, ziel).zeilen) == 1
+    assert verarbeiten(VORLAGE, belege, ziel).zeilen == []
+
+
+def test_ersatzzeile_behaelt_kilometerstand(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Shop\nSumme 23,40\n20.01.2026\nKennzeichen GE EL 1800\nKilometerstand 5000")
+    ziel = tmp_path / "z.xlsx"
+    verarbeiten(VORLAGE, belege, ziel)
+    assert _eintragungen(ziel)[0][6] == 5000
+
+
+def test_unsichere_zusatzposition_bekommt_pruefhinweis():
+    import verarbeitung as v
+    d = bc.BelegDaten(datum=date(2026, 1, 20), posten=(("AdBlue", 7.99),))
+    d.fahrzeug = bc.Fahrzeug("1800", "GE EL 1800", "Becke")
+    d.hinweise.append("OCR unsicher bei posten: gelesen ... gewählt")
+    (z,) = v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "a.pdf | Seite 1"))
+    assert z.pruefhinweis == "* Bitte prüfen/vervollständigen: Zusatzposition unsicher (a.pdf, Seite 1)"
