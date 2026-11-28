@@ -748,7 +748,8 @@ def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
             daten.posten += dazu
             ergaenzt.append("posten " + _fmt(dazu))
             rest = daten.rest()
-            if rest is not None and rest < -0.02 and daten.kraftstoff_preis is not None:
+            if (rest is not None and rest < -0.02 and daten.kraftstoff_preis is not None
+                    and "Kraftstoffpreis aus Summe abgeleitet" in daten.hinweise):
                 # Kraftstoffpreis war aus der Summe abgeleitet und enthielt die neuen Posten schon
                 neu = llm.kraftstoff_preis or round(daten.kraftstoff_preis + rest, 2)
                 if neu > 0:
