@@ -693,6 +693,17 @@ def _from_llm(data: dict, fahrzeuge: FahrzeugListe) -> BelegDaten:
 
 # ---------------------------------------------------------------- Ablauf je Beleg
 
+def seitenbild(seite: BelegSeite) -> Image.Image | None:
+    """Seitenbild für Vision-Modelle, bei PDFs mit Textschicht frisch gerendert."""
+    if seite.image is not None or seite.datei.suffix.lower() != ".pdf":
+        return seite.image
+    try:
+        with pymupdf.open(seite.datei) as doc:
+            return _page_image(doc, doc[seite.seite - 1])
+    except Exception:
+        return None
+
+
 def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
               log=lambda msg: None) -> BelegDaten:
     """ki: None/False = nur OCR, True = Ollama (Standard), sonst ki_anbieter.KiEinstellung."""
@@ -708,7 +719,7 @@ def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
     unklar = (daten.fehlende_pflichtfelder() or daten.kilometerstand is None or (rest is not None and abs(rest) > 0.02)
               or any(h.startswith("OCR unsicher") for h in daten.hinweise))
     if ki.aktiv and unklar:
-        bild = seite.image if ki.bild else None
+        bild = seitenbild(seite) if ki.bild else None
         log(f"{seite.name}: frage {ki.beschreibung()}{' mit Seitenbild' if bild is not None else ''} ...")
         try:
             llm = ki_anbieter.frage_ki(ki, max(texts, key=len), bild, fahrzeuge)
@@ -732,6 +743,13 @@ def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
         if dazu:
             daten.posten += dazu
             ergaenzt.append("posten " + _fmt(dazu))
+            rest = daten.rest()
+            if rest is not None and rest < -0.02 and daten.kraftstoff_preis is not None:
+                # Kraftstoffpreis war aus der Summe abgeleitet und enthielt die neuen Posten schon
+                neu = llm.kraftstoff_preis or round(daten.kraftstoff_preis + rest, 2)
+                if neu > 0:
+                    korrigiert.append(f"kraftstoff_preis {_fmt(daten.kraftstoff_preis)} -> {_fmt(neu)}")
+                    daten.kraftstoff_preis = neu
         if ergaenzt:
             daten.hinweise.append("KI ergänzt: " + ", ".join(ergaenzt))
         if korrigiert:
