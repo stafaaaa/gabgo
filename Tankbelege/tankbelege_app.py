@@ -285,7 +285,8 @@ class App:
         self.root.after(100, self._poll)
 
     def _pruefen(self):
-        ziel = self.letztes_ziel or Path(self.ziel.get().strip() or standard_ziel())
+        feld = self.ziel.get().strip()
+        ziel = Path(feld) if feld else (self.letztes_ziel or standard_ziel())
         if not ziel.exists():
             return messagebox.showinfo("Gelbe Belege prüfen", f"{ziel.name} gibt es noch nicht – bitte zuerst importieren.")
         try:
