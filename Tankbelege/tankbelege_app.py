@@ -17,7 +17,20 @@ from excel_vorlage import VorlagenFehler
 from verarbeitung import verarbeiten, _zeile_text
 
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-STANDARD_VORLAGE = APP_DIR / "Tanken_neu - Kopie.xlsx"
+VORLAGE_NAME = "Tanken_neu - Kopie.xlsx"
+# PyInstaller bettet die Vorlage ein (--add-data); im Skriptbetrieb liegt sie neben dem Programm.
+EINGEBETTET_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
+
+
+def finde_vorlage(app_dir: Path = APP_DIR, eingebettet: Path = EINGEBETTET_DIR) -> Path | None:
+    """Fest hinterlegte Vorlage: zuerst im Programmordner, sonst die in die EXE eingebettete Kopie."""
+    for p in (app_dir / VORLAGE_NAME, eingebettet / VORLAGE_NAME):
+        if p.is_file():
+            return p
+    return None
+
+
+STANDARD_VORLAGE = finde_vorlage() or APP_DIR / VORLAGE_NAME
 
 
 def _dokumente() -> Path:
@@ -48,8 +61,9 @@ if INSTALLIERT:
         pass
 
 
-def standard_ziel(vorlage: Path) -> Path:
-    ordner = DATEN_DIR if Path(vorlage).resolve().parent == APP_DIR.resolve() else Path(vorlage).parent
+def standard_ziel(vorlage: Path | None = None) -> Path:
+    eigene = vorlage is not None and Path(vorlage).resolve() != STANDARD_VORLAGE.resolve()
+    ordner = Path(vorlage).parent if eigene else DATEN_DIR
     return ordner / f"Tanken_{date.today():%Y_%m}_ausgefuellt.xlsx"
 
 
@@ -59,9 +73,8 @@ class App:
         root.title("Tankbelege -> Excel")
         root.minsize(720, 480)
         self.events: queue.Queue = queue.Queue()
-        self.vorlage = StringVar(value=str(STANDARD_VORLAGE) if STANDARD_VORLAGE.exists() else "")
         self.belege = StringVar(value=str(STANDARD_BELEGE) if STANDARD_BELEGE.is_dir() else "")
-        self.ziel = StringVar(value=str(standard_ziel(STANDARD_VORLAGE)) if STANDARD_VORLAGE.exists() else "")
+        self.ziel = StringVar(value=str(standard_ziel()))
         self.ollama = BooleanVar(value=False)
         self.status = StringVar(value="Bereit")
         self.letztes_ziel: Path | None = None
@@ -69,35 +82,27 @@ class App:
         frm = ttk.Frame(root, padding=12)
         frm.pack(fill="both", expand=True)
         frm.columnconfigure(1, weight=1)
-        rows = [("Excel-Vorlage:", self.vorlage, self._waehle_vorlage),
-                ("Belege-Ordner:", self.belege, self._waehle_ordner),
+        rows = [("Belege-Ordner:", self.belege, self._waehle_ordner),
                 ("Ziel-Datei:", self.ziel, self._waehle_ziel)]
         for i, (label, var, cmd) in enumerate(rows):
             ttk.Label(frm, text=label).grid(row=i, column=0, sticky="w", pady=3)
             ttk.Entry(frm, textvariable=var).grid(row=i, column=1, sticky="ew", padx=6)
             ttk.Button(frm, text="Auswählen ...", command=cmd).grid(row=i, column=2)
         ttk.Checkbutton(frm, text="Ollama-Fallback (lokal, llama3.2) bei unklaren Belegen",
-                        variable=self.ollama).grid(row=3, column=1, columnspan=2, sticky="w", pady=6)
+                        variable=self.ollama).grid(row=2, column=1, columnspan=2, sticky="w", pady=6)
         btns = ttk.Frame(frm)
-        btns.grid(row=4, column=0, columnspan=3, sticky="ew")
+        btns.grid(row=3, column=0, columnspan=3, sticky="ew")
         self.start_btn = ttk.Button(btns, text="Start", command=self._start)
         self.start_btn.pack(side="left")
         self.open_btn = ttk.Button(btns, text="Ergebnis öffnen", command=self._oeffnen, state="disabled")
         self.open_btn.pack(side="left", padx=6)
         self.progress = ttk.Progressbar(frm, mode="determinate")
-        self.progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 2))
-        ttk.Label(frm, textvariable=self.status).grid(row=6, column=0, columnspan=3, sticky="w")
+        self.progress.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 2))
+        ttk.Label(frm, textvariable=self.status).grid(row=5, column=0, columnspan=3, sticky="w")
         self.log = ScrolledText(frm, height=14, state="disabled", font=("Consolas", 9))
-        self.log.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(6, 0))
-        frm.rowconfigure(7, weight=1)
+        self.log.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(6, 0))
+        frm.rowconfigure(6, weight=1)
         root.after(100, self._poll)
-
-    def _waehle_vorlage(self):
-        p = filedialog.askopenfilename(title="Excel-Vorlage", filetypes=[("Excel", "*.xlsx")])
-        if p:
-            self.vorlage.set(p)
-            if not self.ziel.get():
-                self.ziel.set(str(standard_ziel(Path(p))))
 
     def _waehle_ordner(self):
         p = filedialog.askdirectory(title="Belege-Ordner")
@@ -105,7 +110,7 @@ class App:
             self.belege.set(p)
 
     def _waehle_ziel(self):
-        start = Path(self.ziel.get() or self.vorlage.get() or APP_DIR)
+        start = Path(self.ziel.get()) if self.ziel.get() else standard_ziel()
         p = filedialog.asksaveasfilename(title="Ziel-Datei", defaultextension=".xlsx",
                                          initialdir=start.parent, initialfile=start.name,
                                          filetypes=[("Excel", "*.xlsx")], confirmoverwrite=False)
@@ -119,9 +124,11 @@ class App:
         self.log.configure(state="disabled")
 
     def _start(self):
-        vorlage, belege, ziel = Path(self.vorlage.get()), Path(self.belege.get()), Path(self.ziel.get())
-        if not vorlage.is_file():
-            return messagebox.showerror("Fehler", "Bitte eine gültige Excel-Vorlage wählen.")
+        vorlage, belege, ziel = finde_vorlage(), Path(self.belege.get()), Path(self.ziel.get())
+        if vorlage is None:
+            return messagebox.showerror(
+                "Fehler", f"Die fest hinterlegte Excel-Vorlage „{VORLAGE_NAME}“ fehlt im Programmordner "
+                f"{APP_DIR}. Bitte Tankbelege neu installieren.")
         if not belege.is_dir():
             return messagebox.showerror("Fehler", "Bitte einen gültigen Belege-Ordner wählen.")
         if not self.ziel.get():
@@ -134,7 +141,7 @@ class App:
         self.start_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
         self.progress["value"] = 0
-        self._schreibe(f"--- Start: {belege} ---")
+        self._schreibe(f"--- Start: {belege} ---\nVorlage (fest hinterlegt): {vorlage}")
         threading.Thread(target=self._arbeite, args=(vorlage, belege, ziel, self.ollama.get()),
                          daemon=True).start()
 

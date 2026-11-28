@@ -6,13 +6,18 @@ Zeilen an `Tabelle6` im Blatt „Eintragungen“ einer Kopie der Excel-Vorlage a
 ## Start
 
 * **EXE:** `Tankbelege.exe` (aus `build_exe.bat` oder dem GitHub-Actions-Artefakt *Tankbelege-Windows*)
-  neben die Vorlage und den Ordner `Belege` legen und starten.
+  neben den Ordner `Belege` legen und starten.
 * **Python:** `start.bat` doppelklicken – legt beim ersten Start `.venv` an und installiert die Pakete
   aus `requirements.txt` (Python 3.10+ nötig).
 * **Kommandozeile:** `python tankbelege_app.py --cli --vorlage "Tanken_neu - Kopie.xlsx" --belege Belege --ziel Tanken_2026_11.xlsx [--ollama]`
 
 Voraussetzung für Bild-Scans: Tesseract unter `C:\Program Files\Tesseract-OCR\tesseract.exe`
 (am besten mit Sprachpaket *Deutsch*; anderer Pfad über Umgebungsvariable `TESSERACT_CMD`).
+
+Die Excel-Vorlage `Tanken_neu - Kopie.xlsx` ist fest hinterlegt und wird in der Oberfläche nicht mehr
+ausgewählt. Die App nimmt zuerst die Vorlage im Programmordner (beim Setup `C:\Program Files\Tankbelege`)
+und sonst die in die EXE eingebettete Kopie. Eine andere Vorlage geht nur noch per Kommandozeile mit
+`--vorlage`.
 
 ## Ablauf
 

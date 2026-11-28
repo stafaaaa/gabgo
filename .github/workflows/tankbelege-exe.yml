@@ -23,7 +23,17 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest pyinstaller
       - run: python -m pytest -q tests
-      - run: pyinstaller --noconfirm --onefile --windowed --name Tankbelege tankbelege_app.py
+      - run: pyinstaller --noconfirm --onefile --windowed --add-data 'Tanken_neu - Kopie.xlsx;.' --name Tankbelege tankbelege_app.py
+      - name: EXE ohne danebenliegende Vorlage testen (eingebettete Vorlage)
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 'nur_exe'
+          New-Item -ItemType Directory -Force "$t\Belege" | Out-Null
+          Copy-Item dist\Tankbelege.exe $t
+          Copy-Item Belege\*.pdf "$t\Belege"
+          $p = Start-Process "$t\Tankbelege.exe" -ArgumentList '--cli','--belege',"$t\Belege",'--ziel',"$t\T.xlsx" -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or -not (Test-Path "$t\T.xlsx")) { throw 'EXE ohne Vorlage fehlgeschlagen' }
+          Get-Content "$t\T_pruefung.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: Tankbelege-Windows

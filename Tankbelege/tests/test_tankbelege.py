@@ -353,3 +353,17 @@ def test_neuer_zielordner_wird_angelegt(tmp_path):
     ziel = tmp_path / "neu" / "unter" / "Tanken_test.xlsx"
     erg = verarbeiten(VORLAGE, belege, ziel)
     assert ziel.exists() and len(erg.zeilen) == 2
+
+
+def test_fest_hinterlegte_vorlage_mit_fallback(tmp_path):
+    import shutil
+    import tankbelege_app as app
+    programm, eingebettet = tmp_path / "programm", tmp_path / "eingebettet"
+    programm.mkdir()
+    eingebettet.mkdir()
+    assert app.finde_vorlage(programm, eingebettet) is None
+    shutil.copy(VORLAGE, eingebettet / app.VORLAGE_NAME)
+    assert app.finde_vorlage(programm, eingebettet) == eingebettet / app.VORLAGE_NAME
+    shutil.copy(VORLAGE, programm / app.VORLAGE_NAME)
+    assert app.finde_vorlage(programm, eingebettet) == programm / app.VORLAGE_NAME
+    assert app.standard_ziel().parent == app.DATEN_DIR
