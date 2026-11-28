@@ -384,7 +384,7 @@ def _ist_kraftstoffzeile(line: str, art: str | None) -> bool:
 
 def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
     """Bezahlte Positionen außer Kraftstoff: {Art: Betrag} und die dafür gelesenen Zeilen."""
-    gesehen: dict[str, set[float]] = {}
+    gesehen: dict[str, list[tuple[float, set[str]]]] = {}
     benutzt: set[int] = set()
     for i, line in enumerate(lines):
         art = posten_art(line)
@@ -392,10 +392,11 @@ def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
             continue
         if (art == WAESCHE and QTY.search(line)) or _ist_kraftstoffzeile(line, art):
             continue
-        vals = [v for v in betraege(line) if v > 0]
+        alle = betraege(line)
+        vals = [v for v in alle if v > 0]
         zeilen = {i}
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        if (not vals and nxt and not posten_art(nxt) and not TOTAL_WORDS.search(nxt)
+        if (not alle and nxt and not posten_art(nxt) and not TOTAL_WORDS.search(nxt)
                 and not FUEL_WORDS.search(nxt) and not KEIN_POSTEN.search(nxt)):
             # Werbung ("Autowäsche geöffnet", "Wäsche ab 9,99 €/St") ist keine gekaufte Wäsche
             if art != WAESCHE or not (re.search(r"/\s*st", nxt, re.I) or QTY.search(nxt) or UNIT_PRICE.search(nxt)):
@@ -403,9 +404,14 @@ def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
                 zeilen.add(i + 1)
         if vals:
             # Viele Bons listen eine Position zweimal (Kopf + Artikelzeile): gleicher Betrag zählt einmal
-            gesehen.setdefault(art, set()).add(vals[-1])
+            # gleicher Betrag zählt nur einmal, wenn auch das Produktwort gleich ist
+            # ("Wash Glanzwäsche € 11,49" / "0082 Glanzwäsche 11,49"), nicht bei Innenreinigung + Staubsauger
+            woerter = {w.lower() for z in zeilen for w in re.findall(r"[^\W\d_]{4,}", lines[z])}
+            liste = gesehen.setdefault(art, [])
+            if not any(v == vals[-1] and w & woerter for v, w in liste):
+                liste.append((vals[-1], woerter))
             benutzt |= zeilen
-    return {art: round(sum(werte), 2) for art, werte in gesehen.items()}, benutzt
+    return {art: round(sum(v for v, _ in werte), 2) for art, werte in gesehen.items()}, benutzt
 
 
 def combine(results: list[BelegDaten]) -> BelegDaten:
