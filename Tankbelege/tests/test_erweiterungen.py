@@ -316,3 +316,19 @@ def test_gelesener_kraftstoffpreis_bleibt_bei_ki_posten(tmp_path, fz, monkeypatc
     monkeypatch.setattr(ki_anbieter, "frage_ki", lambda *a, **k: bc.BelegDaten(posten=(("AdBlue", 7.0),)))
     d = bc.auswerten(seite, fz, "deu", ki_anbieter.KiEinstellung("openrouter", "", "k"))
     assert d.kraftstoff_preis == 70.0
+
+
+def test_literzahl_vor_kraftstoffzeile_nach_zusatzartikel(fz):
+    d = parse("Wischwasser 4,99\n40,00 l\nDiesel 70,00\nSumme 74,99", fz)
+    assert sorted(liter(d), key=str) == sorted([(40.0, 70.0), ("Wischwasser", 4.99)], key=str)
+
+
+def test_zwei_motoroele_gleicher_preis(fz):
+    d = parse("Öl 5W-30 12,90\nÖl 10W-40 12,90\nSumme 25,80", fz)
+    assert liter(d) == [("Motoröl", 25.8)] and d.rest() == 0
+
+
+def test_abgeleiteter_preis_ueberlebt_mehrheitsentscheid(fz):
+    a = parse("Diesel 40,00 l\nAdBlue\nSumme 77,99", fz)
+    assert a.preis_abgeleitet
+    assert bc.combine([a, a]).preis_abgeleitet
