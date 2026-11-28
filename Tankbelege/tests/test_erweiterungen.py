@@ -297,3 +297,22 @@ def test_einstellungsdatei_nur_fuer_eigenen_benutzer(tmp_path, monkeypatch):
     if os.name != "nt":
         assert stat.S_IMODE((tmp_path / "e.json").stat().st_mode) == 0o600
     assert einstellungen.laden() == {"a": 2}
+
+
+def test_gebindegroesse_nach_zusatzartikel(fz):
+    d = parse("Wischwasser 4,99\n5,00 l\nDiesel 40,00 l 70,00\nSumme 74,99", fz)
+    assert sorted(liter(d), key=str) == sorted([(40.0, 70.0), ("Wischwasser", 4.99)], key=str)
+
+
+def test_adblue_getrennt_geschrieben_zaehlt_einmal(fz):
+    d = parse("Diesel 40,00 l 70,00\n1,750 €/l\nAdBlue 7,99\nAd Blue 7,99\nSumme 77,99", fz)
+    assert liter(d) == [(40.0, 70.0), ("AdBlue", 7.99)]
+
+
+def test_gelesener_kraftstoffpreis_bleibt_bei_ki_posten(tmp_path, fz, monkeypatch):
+    _pdf(tmp_path, "r.pdf", "Diesel 40,00 l 70,00\n1,750 €/l\nRabatt -2,00\nSumme 75,00\n"
+                            "20.01.2026 12:57\nKennzeichen GE EL 545E\n")
+    seite = next(bc.iter_belege(tmp_path))
+    monkeypatch.setattr(ki_anbieter, "frage_ki", lambda *a, **k: bc.BelegDaten(posten=(("AdBlue", 7.0),)))
+    d = bc.auswerten(seite, fz, "deu", ki_anbieter.KiEinstellung("openrouter", "", "k"))
+    assert d.kraftstoff_preis == 70.0
