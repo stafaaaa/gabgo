@@ -259,7 +259,9 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
                 next((i for i, alt in enumerate(neue) if _ohne_endziffer_gleich(alt.key(), z.key())), None)
             if n is not None or i is not None:
                 ziele[id(z)] = (n, i)
-        if len(ziele) < sum(not _unvollstaendig(z) for z in pz):
+        offen = [z for z in pz if not _unvollstaendig(z) and schluessel(z.key()) not in gesehen
+                 and not _korrigiert(schluessel(z.key()), korrigiert)]  # schon vorhandene Positionen zählen als Treffer
+        if any(id(z) not in ziele for z in offen):
             ziele = {}  # derselbe Beleg nur, wenn alle Positionen übereinstimmen (z. B. nicht nur die Wäsche)
         for z in pz:
             if _korrigiert(schluessel(z.key()), korrigiert):

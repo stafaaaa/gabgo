@@ -866,3 +866,16 @@ def test_korrigierter_beleg_wird_nicht_erneut_gebucht(tmp_path):
     erg = verarbeiten(VORLAGE, belege, ziel)
     assert erg.zeilen == [] and erg.ergaenzt == []
     assert len(_eintragungen(ziel)) == 2
+
+
+def test_teilweise_gepruefter_kombibeleg_wird_ergaenzt(tmp_path):
+    text = "Tankstelle Musterstadt\nDiesel 40,00 l 71,96\nGlanzwäsche 11,49\nSumme 83,45\n20.01.2026\n"
+    ziel = tmp_path / "z.xlsx"
+    _pdf(tmp_path / "B", "a.pdf", text)
+    verarbeiten(VORLAGE, tmp_path / "B", ziel)
+    waesche = next(p for p in pa.gelbe_zeilen(ziel) if p.liter == "Wäsche")
+    pa.zeile_speichern(ziel, waesche.zeile, pa.werte_lesen("1800", "20.01.2026", "Wäsche", "11,49", ""), erwartet=waesche)
+    _pdf(tmp_path / "B2", "b.pdf", text + "Kennzeichen GE EL 1800\nKilometerstand 5000")
+    erg = verarbeiten(VORLAGE, tmp_path / "B2", ziel)
+    assert erg.zeilen == [] and len(erg.ergaenzt) == 1
+    assert sorted(str(r[0]) for r in _eintragungen(ziel)) == ["1800", "1800"]
