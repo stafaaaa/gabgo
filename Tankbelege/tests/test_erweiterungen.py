@@ -14,7 +14,8 @@ sys.path.insert(0, str(ROOT))
 import belege_core as bc  # noqa: E402
 import einstellungen  # noqa: E402
 import ki_anbieter  # noqa: E402
-from excel_vorlage import ExcelVorlage, VorlagenFehler  # noqa: E402
+import pruef_assistent as pa  # noqa: E402
+from excel_vorlage import ExcelVorlage, VorlagenFehler, Zeile  # noqa: E402
 from verarbeitung import pruefe_ziel_frei, verarbeiten, zeilen_aus_beleg  # noqa: E402
 
 VORLAGE = ROOT / "Tanken_neu - Kopie.xlsx"
@@ -377,7 +378,9 @@ def test_pruefhinweis_in_spalte_h_und_gelb(tmp_path):
     erg = verarbeiten(VORLAGE, belege, ziel)
     (zeile,) = _eintragungen(ziel)
     assert zeile[0] == 1800 and zeile[4] == 40.0 and zeile[5] == 70.0 and zeile[6] is None
-    assert zeile[7] == "* Bitte prüfen/vervollständigen: Handschrift/km fehlt oder unleserlich (a.pdf, Seite 1)"
+    assert pa._hinweis_aus_zelle(zeile[7]) == (
+        "* Bitte prüfen/vervollständigen: Handschrift/km fehlt oder unleserlich (a.pdf, Seite 1)",
+        "Belege_Vorschau/a_S1.png")
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
     assert ws["H1"].value == "Prüfhinweis" and ws.tables["Tabelle6"].ref == "A1:H3"
     regeln = [r for cf in ws.conditional_formatting for r in cf.rules]
@@ -597,7 +600,7 @@ def test_vorhandene_zeile_ohne_endziffer_wird_ergaenzt(tmp_path):
     _pdf(belege, "a.pdf", OHNE_KZ)
     verarbeiten(VORLAGE, belege, ziel)
     (zeile,) = _eintragungen(ziel)
-    assert zeile[0] is None and zeile[7].startswith("* ")
+    assert zeile[0] is None and pa._hinweis_aus_zelle(zeile[7])[0].startswith("* ")
     _pdf(belege, "b.pdf", MIT_KZ)
     erg = verarbeiten(VORLAGE, belege, ziel)
     assert erg.zeilen == [] and [n for n, _ in erg.ergaenzt] == [3]
@@ -607,3 +610,140 @@ def test_vorhandene_zeile_ohne_endziffer_wird_ergaenzt(tmp_path):
     assert ws["B3"].value.startswith("=VLOOKUP") and ws.tables["Tabelle6"].ref == "A1:H3"
     assert "In Zeilen ohne Endziffer ergänzt: 3" in erg.zusammenfassung()
     assert verarbeiten(VORLAGE, belege, ziel).zeilen == []
+
+
+def test_bildausschnitt_und_link_in_spalte_h(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "Scan März.pdf", OHNE_KZ)
+    ziel = tmp_path / "Ziel" / "z.xlsx"
+    verarbeiten(VORLAGE, belege, ziel)
+    bild = ziel.parent / "Belege_Vorschau" / "Scan_März_S1.png"
+    with Image.open(bild) as im:
+        assert im.width < 900 and im.height < 600  # A4 bei 200 dpi wäre 1654 x 2339, zugeschnitten auf den Text
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws["H3"].value.startswith('=HYPERLINK("Belege_Vorschau/Scan_März_S1.png","* Bitte prüfen')
+    regeln = [r for cf in ws.conditional_formatting for r in cf.rules]
+    assert [r.formula for r in regeln] == [['LEFT($H3,1)="*"']]
+    (p,) = pa.gelbe_zeilen(ziel)
+    assert p.zeile == 3 and p.vorschau == "Belege_Vorschau/Scan_März_S1.png" and p.quelle() == ("Scan März.pdf", 1)
+    assert pa.bild_laden(p, ziel, None).size == Image.open(bild).size
+    bild.unlink()  # ohne gespeichertes Bild: Seite aus dem Belege-Ordner
+    assert pa.bild_laden(p, ziel, belege) is not None
+
+
+def test_zuschneiden_entfernt_weissen_rand():
+    im = Image.new("RGB", (1000, 1400), "white")
+    im.paste((0, 0, 0), (300, 200, 600, 900))
+    im.putpixel((50, 50), (0, 0, 0))  # Staubkorn
+    assert pa.zuschneiden(im, rand=10).size == (320, 720)
+
+
+def test_langer_pruefhinweis_als_hyperlink():
+    z = Zeile(1800, date(2026, 1, 20), 40.0, 70.0, pruefhinweis="* " + 'x"y' * 120, vorschau="Belege_Vorschau/a.png")
+    zelle = ExcelVorlage(VORLAGE)._pruef_cell("H3", z, None)
+    text, link = pa._hinweis_aus_zelle("=" + zelle.split("<f>")[1].split("</f>")[0].replace("&amp;", "&")
+                                       .replace("&quot;", '"'))
+    assert (text, link) == (z.pruefhinweis, z.vorschau)
+
+
+@pytest.mark.parametrize("eingabe, erwartet", [
+    (("1800", "20.01.2026", "56,37", "101,41", "11836"), (1800, date(2026, 1, 20), 56.37, 101.41, 11836)),
+    (("545e", "20.01.26", "Wäsche", "11,49 €", ""), ("545E", date(2026, 1, 20), "Wäsche", 11.49, None)),
+    (("", "", "", "", "12.345"), (None, None, None, None, 12345)),
+])
+def test_werte_lesen(eingabe, erwartet):
+    z = pa.werte_lesen(*eingabe)
+    assert (z.endziffer, z.datum, z.liter, z.preis, z.kilometerstand) == erwartet
+
+
+@pytest.mark.parametrize("eingabe", [("1", "32.01.2026", "", "", ""), ("1", "", "", "abc", ""),
+                                     ("1", "", "", "", "12,5x")])
+def test_werte_lesen_fehler(eingabe):
+    with pytest.raises(ValueError):
+        pa.werte_lesen(*eingabe)
+
+
+def _gelbe_datei(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", OHNE_KZ)
+    _pdf(belege, "b.pdf", "Diesel 30,00 l 52,50\n1,750 €/l\nSumme 52,50\n21.01.2026\nKennzeichen GE EL 1800")
+    ziel = tmp_path / "z.xlsx"
+    verarbeiten(VORLAGE, belege, ziel)
+    return belege, ziel
+
+
+def test_pruef_assistent_speichert_zeile_und_entfernt_gelb(tmp_path):
+    belege, ziel = _gelbe_datei(tmp_path)
+    assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [3, 4]
+    assert pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40,00", "71,96", "11900")) == "datei"
+    zeilen = _eintragungen(ziel)
+    assert (zeilen[0][0], zeilen[0][3].date(), zeilen[0][4], zeilen[0][5], zeilen[0][6], zeilen[0][7]) == \
+        ("545E", date(2026, 1, 20), 40.0, 71.96, 11900, None)
+    assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [4]
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws["B3"].value.startswith("=VLOOKUP") and ws.tables["Tabelle6"].ref == "A1:H4"
+    assert ws["D3"].number_format == ws["D4"].number_format
+    wb = openpyxl.load_workbook(ziel, data_only=True)
+    assert wb["Eintragungen"]["B3"].value == "GE EL 545E"
+    pa.zeile_speichern(ziel, 4, pa.werte_lesen("1800", "21.01.2026", "30", "52,50", ""))
+    assert pa.gelbe_zeilen(ziel) == [] and len(_eintragungen(ziel)) == 2
+    assert verarbeiten(VORLAGE, belege, ziel).zeilen == []  # erneuter Import: nichts doppelt
+
+
+def test_pruef_assistent_nutzt_geoeffnetes_excel(tmp_path, monkeypatch):
+    import types
+    _, ziel = _gelbe_datei(tmp_path)
+    zellen, gespeichert = {}, []
+
+    class Bereich:
+        def __init__(self, ref):
+            self.ref = ref
+        def ClearContents(self):
+            zellen[self.ref] = None
+        def __setattr__(self, name, v):
+            if name == "Value":
+                zellen[self.ref] = v
+            else:
+                object.__setattr__(self, name, v)
+
+    blatt = types.SimpleNamespace(Range=Bereich)
+    mappe = types.SimpleNamespace(FullName=str(ziel.resolve()), Worksheets=lambda name: blatt,
+                                  Save=lambda: gespeichert.append(1))
+    client = types.ModuleType("win32com.client")
+    client.GetActiveObject = lambda name: types.SimpleNamespace(Workbooks=[mappe])
+    win32com = types.ModuleType("win32com")
+    win32com.client = client
+    pythoncom = types.ModuleType("pythoncom")
+    pythoncom.CoInitialize = pythoncom.CoUninitialize = lambda: None
+    monkeypatch.setitem(sys.modules, "win32com", win32com)
+    monkeypatch.setitem(sys.modules, "win32com.client", client)
+    monkeypatch.setitem(sys.modules, "pythoncom", pythoncom)
+    vorher = ziel.read_bytes()
+    assert pa.zeile_speichern(ziel, 3, pa.werte_lesen("1800", "20.01.2026", "40", "71,96", "")) == "excel"
+    assert zellen["A3"] == 1800 and zellen["E3"] == 40.0 and zellen["G3"] is None and zellen["H3"] is None
+    assert gespeichert == [1] and ziel.read_bytes() == vorher
+
+
+def test_pruef_fenster(tmp_path):
+    tk = pytest.importorskip("tkinter")
+    belege, ziel = _gelbe_datei(tmp_path)
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("kein Display")
+    root.withdraw()
+    try:
+        f = pa.PruefFenster(root, ziel, belege)
+        root.update()
+        assert f.win.attributes("-topmost") and f.bild is not None
+        assert f.titel.get() == "Beleg 1 von 2 – Excel-Zeile 3"
+        f._zoomen(1.15)
+        f._drehen()
+        f.felder["endziffer"].set("1800")
+        f._speichern()
+        assert f.titel.get() == "Beleg 2 von 2 – Excel-Zeile 4"
+        f._weiter()
+        assert f.titel.get().startswith("Keine gelben Belege mehr")
+        assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [4]
+    finally:
+        root.destroy()

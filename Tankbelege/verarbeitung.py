@@ -11,6 +11,7 @@ from pathlib import Path
 
 import belege_core as bc
 import ki_anbieter
+import pruef_assistent
 from excel_vorlage import SHEET_LISTE, WAESCHE, ExcelVorlage, VorlagenFehler, Zeile
 
 
@@ -180,6 +181,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     neue: list[Zeile] = []
     ergaenzen: dict[int, Zeile] = {}
     gelesen: list[tuple] = []
+    quellen: dict[str, tuple] = {}
     fortschritt(0, gesamt, "Starte ...")
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
         fortschritt(nr - 1, gesamt, f"Lese {seite.name}")
@@ -211,6 +213,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
             ergebnis.uebersprungen += 1
             continue
         gelesen.append((seite, daten))
+        quellen[seite.quelle] = (seite.datei, seite.seite)
         log(f"{seite.name}: {_kurz(daten)}")
 
     km_ergaenzt = _km_zuordnung(excel, [d for _, d in gelesen])
@@ -282,6 +285,21 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
             hinweise.append(f"{seite.name}: Fahrzeug {fz.endziffer} ({fz.kennzeichen or 'Kennzeichen unbekannt'}) "
                             f"stand nicht in '{SHEET_LISTE}' – neu angelegt, Fahrer: {fz.fahrer or 'leer'}.")
     fortschritt(gesamt, gesamt, "Schreibe Excel ...")
+    vorschau: dict[str, str] = {}
+
+    def mit_vorschau(z: Zeile) -> Zeile:
+        if not z.pruefhinweis or z.quelle not in quellen:
+            return z
+        if z.quelle not in vorschau:
+            try:
+                vorschau[z.quelle] = pruef_assistent.vorschau_speichern(ziel, *quellen[z.quelle])
+            except Exception as exc:
+                vorschau[z.quelle] = ""
+                hinweise.append(f"Bildausschnitt für {z.quelle} nicht erstellt: {exc}")
+        return replace(z, vorschau=vorschau[z.quelle])
+    neue = [mit_vorschau(z) for z in neue]
+    ergaenzen = {n: mit_vorschau(z) for n, z in ergaenzen.items()}
+    ergebnis.ergaenzt = list(ergaenzen.items())
 
     pruefe_ziel_frei(ziel)
     nummern = excel.speichern(ziel, neue, anhaengen=anhaengen, neue_fahrzeuge=ergebnis.neue_fahrzeuge,

@@ -53,6 +53,7 @@ class Zeile:
     kilometerstand: int | None = None
     quelle: str = ""
     pruefhinweis: str = ""  # Spalte H, z. B. "* Bitte prüfen/vervollständigen: ..."
+    vorschau: str = ""  # relativer Link auf den Bildausschnitt, z. B. "Belege_Vorschau/Scan_S1.png"
 
     def key(self):
         liter = self.liter if self.liter is None or isinstance(self.liter, str) else round(float(self.liter), 2)
@@ -156,10 +157,12 @@ class ExcelVorlage:
 
     # ---------------------------------------------------------- Schreiben
     def speichern(self, ziel: Path, zeilen: list[Zeile], anhaengen: bool = False,
-                  neue_fahrzeuge: list[Fahrzeug] = (), ergaenzen: dict | None = None) -> list[int]:
+                  neue_fahrzeuge: list[Fahrzeug] = (), ergaenzen: dict | None = None,
+                  aktualisieren: dict | None = None) -> list[int]:
         """anhaengen=True: self.path ist eine bereits erzeugte Ausgabe und wird fortgeschrieben.
         neue_fahrzeuge werden am Ende von "Liste KfZ_Fahrer" ergänzt.
-        ergaenzen: {Excel-Zeile: Zeile} – vorhandene Einträge ohne Endziffer um Endziffer, km und Prüfhinweis ergänzen."""
+        ergaenzen: {Excel-Zeile: Zeile} – vorhandene Einträge ohne Endziffer um Endziffer, km und Prüfhinweis ergänzen.
+        aktualisieren: {Excel-Zeile: Zeile} – A, D–H einer vorhandenen Zeile ersetzen (Prüf-Assistent)."""
         ziel = Path(ziel)
         if ziel.suffix.lower() != ".xlsx":
             raise VorlagenFehler("Ziel muss eine .xlsx-Datei sein.")
@@ -170,10 +173,15 @@ class ExcelVorlage:
         liste_ende = self._liste_erweitern(parts, list(neue_fahrzeuge), strings) if neue_fahrzeuge else 0
         sheet = parts[self.sheet_part].decode("utf-8")
 
-        for n, z in sorted((ergaenzen or {}).items(), reverse=True):
+        date_style = self._date_style(parts)
+        aenderungen = [(n, z, False) for n, z in (ergaenzen or {}).items()]
+        aenderungen += [(n, z, True) for n, z in (aktualisieren or {}).items()]
+        for n, z, voll in sorted(aenderungen, key=lambda a: a[0], reverse=True):
             m = next((m for m in ROW_RE.finditer(sheet) if int(m.group(1)) == n), None)
-            if m is not None:
-                sheet = sheet[:m.start()] + self._zeile_ergaenzen(m.group(0), n, z, strings) + sheet[m.end():]
+            if m is None:
+                raise VorlagenFehler(f"Zeile {n} gibt es in 'Eintragungen' nicht.")
+            sheet = (sheet[:m.start()] + self._zeile_ergaenzen(m.group(0), n, z, strings, date_style, voll)
+                     + sheet[m.end():])
         rows = {int(m.group(1)): m for m in ROW_RE.finditer(sheet)}
         if 2 not in rows:
             raise VorlagenFehler("Vorlagezeile 2 fehlt im Blatt 'Eintragungen'.")
@@ -199,7 +207,6 @@ class ExcelVorlage:
             m = rows[n]
             sheet = sheet[:m.start()] + sheet[m.end():]
 
-        date_style = self._date_style(parts)
         new_xml, numbers = [], []
         for i, z in enumerate(zeilen):
             n = start + i
@@ -224,7 +231,7 @@ class ExcelVorlage:
             if z.kilometerstand is not None:
                 cells.append(self._value_cell(f"G{n}", z.kilometerstand, strings))
             if z.pruefhinweis:
-                cells.append(self._value_cell(f"H{n}", z.pruefhinweis, strings))
+                cells.append(self._pruef_cell(f"H{n}", z, strings))
             if n in later:
                 fremd = _fremde_zellen(later.pop(n))
                 if z.pruefhinweis:
@@ -385,14 +392,28 @@ class ExcelVorlage:
         parts[self.styles_part] = styles.encode("utf-8")
         return idx
 
-    def _zeile_ergaenzen(self, row_xml: str, n: int, z: Zeile, strings) -> str:
+    def _zeile_ergaenzen(self, row_xml: str, n: int, z: Zeile, strings, date_style: int, voll: bool = False) -> str:
+        """voll=False: Endziffer, fehlenden km und Prüfhinweis ergänzen; voll=True: A und D–H ersetzen."""
         zellen = {m.group(1): m for m in CELL_RE.finditer(row_xml)}
         def stil(col):
             return (re.search(r'\ss="\d+"', zellen[col].group(3)) or [""])[0] if col in zellen else ""
-        neu = {"A": self._value_cell(f"A{n}", z.endziffer, strings, stil("A")),
-               "H": self._value_cell(f"H{n}", z.pruefhinweis, strings, stil("H")) if z.pruefhinweis else None}
+        def wert(col, v):
+            return None if v in (None, "") else self._value_cell(f"{col}{n}", v, strings, stil(col))
+        fz = self.endziffer_bekannt(z.endziffer) if z.endziffer not in (None, "") else None
+        neu = {"A": wert("A", fz.endziffer if fz else z.endziffer),
+               "H": self._pruef_cell(f"H{n}", z, strings, stil("H")) if z.pruefhinweis else None}
+        for col, idx in (("B", 1), ("C", 2)):
+            f = re.search(r"<f>(.*?)</f>", (zellen[col].group(4) or "") if col in zellen else "", re.S)
+            if f:
+                neu[col] = (f'<c r="{col}{n}"{stil(col)} t="str"><f>{f.group(1)}</f>'
+                            f'<v>{escape(str((fz.kennzeichen, fz.fahrer)[idx - 1] or ""))}</v></c>' if fz else
+                            f'<c r="{col}{n}"{stil(col)} t="e"><f>{f.group(1)}</f><v>#N/A</v></c>')
         g = zellen.get("G")
-        if z.kilometerstand is not None and not (g and re.search(r"<v>|<is>", g.group(4) or "")):
+        if voll:
+            d_stil = stil("D") or f' s="{date_style}"'
+            neu["D"] = f'<c r="D{n}"{d_stil}><v>{_excel_serial(z.datum)}</v></c>' if z.datum is not None else None
+            neu["E"], neu["F"], neu["G"] = wert("E", z.liter), wert("F", z.preis), wert("G", z.kilometerstand)
+        elif z.kilometerstand is not None and not (g and re.search(r"<v>|<is>", g.group(4) or "")):
             neu["G"] = self._value_cell(f"G{n}", z.kilometerstand, strings, stil("G"))
         alle = {c: m.group(0) for c, m in zellen.items()}
         for c, x in neu.items():
@@ -402,6 +423,16 @@ class ExcelVorlage:
                 alle[c] = x
         kopf = _spans_bis_h(re.match(r"<row [^>]*?(?=/?>)", row_xml).group(0)) + ">"
         return kopf + "".join(alle[c] for c in sorted(alle, key=_col_nr)) + "</row>"
+
+    def _pruef_cell(self, ref: str, z: Zeile, strings, style: str = "") -> str:
+        """Prüfhinweis; mit Bildausschnitt als HYPERLINK-Formel, damit ein Klick nur das kleine Bild öffnet."""
+        if not z.vorschau:
+            return self._value_cell(ref, z.pruefhinweis, strings, style)
+        def literal(t):
+            t = t.replace('"', '""')
+            return "&".join(f'"{t[i:i + 250]}"' for i in range(0, len(t), 250)) or '""'
+        formel = f"HYPERLINK({literal(z.vorschau)},{literal(z.pruefhinweis)})"
+        return f'<c r="{ref}"{style} t="str"><f>{escape(formel)}</f><v>{escape(z.pruefhinweis)}</v></c>'
 
     def _value_cell(self, ref: str, value, strings, style: str = "") -> str:
         if isinstance(value, str):

@@ -16,6 +16,7 @@ from tkinter.scrolledtext import ScrolledText
 import einstellungen
 from excel_vorlage import VorlagenFehler
 from ki_anbieter import ANBIETER, KiEinstellung
+from pruef_assistent import PruefFenster, gelbe_zeilen
 from verarbeitung import verarbeiten, _zeile_text
 
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -140,6 +141,8 @@ class App:
         self.start_btn.pack(side="left")
         self.open_btn = ttk.Button(btns, text="Ergebnis öffnen", command=self._oeffnen, state="disabled")
         self.open_btn.pack(side="left", padx=6)
+        self.pruef_btn = ttk.Button(btns, text="Gelbe Belege prüfen", command=self._pruefen)
+        self.pruef_btn.pack(side="left")
         self.progress = ttk.Progressbar(frm, mode="determinate")
         self.progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 2))
         ttk.Label(frm, textvariable=self.status).grid(row=6, column=0, columnspan=3, sticky="w")
@@ -280,6 +283,19 @@ class App:
         except queue.Empty:
             pass
         self.root.after(100, self._poll)
+
+    def _pruefen(self):
+        ziel = self.letztes_ziel or Path(self.ziel.get().strip() or standard_ziel())
+        if not ziel.exists():
+            return messagebox.showinfo("Gelbe Belege prüfen", f"{ziel.name} gibt es noch nicht – bitte zuerst importieren.")
+        try:
+            if not gelbe_zeilen(ziel):
+                return messagebox.showinfo("Gelbe Belege prüfen", f"In {ziel.name} sind keine gelben Zeilen.")
+            belege = Path(self.belege.get().strip()) if self.belege.get().strip() else None
+            PruefFenster(self.root, ziel, belege,
+                         bei_aenderung=lambda: self._schreibe(f"Prüf-Assistent: Zeile in {ziel.name} gespeichert."))
+        except Exception as exc:
+            messagebox.showerror("Fehler", str(exc))
 
     def _oeffnen(self):
         if self.letztes_ziel and self.letztes_ziel.exists():

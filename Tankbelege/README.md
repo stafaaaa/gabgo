@@ -65,6 +65,15 @@ Unnötige gelbe Markierungen vermeidet die App so:
 - **Duplikat ohne Endziffer:** Stimmen Datum, Liter und Preis exakt überein und fehlt bei einem Eintrag die
   Endziffer, bleibt der vollständigere: In einer vorhandenen Zeile ohne Endziffer werden Endziffer und km ergänzt
   und der Prüfhinweis entfernt, statt eine zweite Zeile anzuhängen.
+**Prüfen ohne PDF-Fenster:** Zu jeder gelben Zeile speichert die App die Belegseite als zugeschnittenes Bild
+(200 dpi, ohne weiße Ränder) in `Belege_Vorschau\` neben der Ziel-Datei. Der Prüfhinweis in Spalte H ist ein
+Link darauf (`=HYPERLINK("Belege_Vorschau/<Datei>_S<Seite>.png"; "* Bitte prüfen …")`); ein Klick öffnet nur das
+kleine Bild. Der Knopf **„Gelbe Belege prüfen“** öffnet ein schmales Fenster (immer im Vordergrund, rechts am
+Bildschirmrand) mit dem Beleg (Mausrad: Zoom, Ziehen: verschieben, „Drehen“) und den Feldern Endziffer, Datum,
+Liter, Preis und Kilometerstand. **„Speichern & Nächster“** schreibt die Werte in die Zeile, löscht den
+Prüfhinweis (damit verschwindet die gelbe Markierung) und lädt den nächsten gelben Beleg. Ist die Ziel-Datei
+dabei in Excel geöffnet, ändert die App die Zeile direkt im offenen Excel und speichert dort (Windows); sonst
+schreibt sie in die Datei.
 Während eines Imports liegt neben der Ziel-Datei eine Sperrdatei `<Ziel>.xlsx.lock`. Ein zweiter Import in
 dieselbe Datei bricht dann mit einem Hinweis ab, statt Einträge zu überschreiben. Eine von einem abgestürzten
 Import liegen gebliebene Sperre wird nach 10 Minuten ohne Lebenszeichen automatisch entfernt.
