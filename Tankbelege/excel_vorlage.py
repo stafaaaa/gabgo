@@ -77,8 +77,9 @@ class ExcelVorlage:
             return {}
         root = ET.fromstring(self.parts[rels_name])
         base = posixpath.dirname(part)
-        return {r.get("Id"): posixpath.normpath(posixpath.join(base, r.get("Target")))
-                for r in root.findall("pr:Relationship", NS)}
+        def ziel(t: str) -> str:  # absolute Ziele ("/xl/...") z. B. nach Speichern mit openpyxl
+            return t.lstrip("/") if t.startswith("/") else posixpath.normpath(posixpath.join(base, t))
+        return {r.get("Id"): ziel(r.get("Target")) for r in root.findall("pr:Relationship", NS)}
 
     def _locate(self):
         wb = ET.fromstring(self.parts["xl/workbook.xml"])
@@ -100,6 +101,9 @@ class ExcelVorlage:
                     if cols != SPALTEN:
                         raise VorlagenFehler(f"Spalten von {TABELLE} weichen ab: {cols}")
                     self.table_ref = t.get("ref")
+                    if int(t.get("totalsRowCount", "0") or 0) > 0:
+                        raise VorlagenFehler(f"{TABELLE} hat eine Ergebniszeile – bitte in Excel ausschalten "
+                                             "(Tabellenentwurf → Ergebniszeile), dann erneut starten.")
         if not self.table_part:
             raise VorlagenFehler(f"Tabelle '{TABELLE}' nicht im Blatt '{SHEET_EINTRAG}' gefunden.")
         wb_rels = rels.values()

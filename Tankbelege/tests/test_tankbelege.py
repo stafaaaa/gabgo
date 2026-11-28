@@ -270,3 +270,47 @@ def test_fremde_datei_als_ziel_wird_abgelehnt(tmp_path):
     (tmp_path / "Belege").mkdir()
     with pytest.raises(VorlagenFehler):
         verarbeiten(VORLAGE, tmp_path / "Belege", ziel)
+
+
+def test_ergebniszeile_im_ziel_wird_abgelehnt(tmp_path):
+    import shutil
+    ziel = tmp_path / "Tanken.xlsx"
+    shutil.copy(VORLAGE, ziel)
+    with zipfile.ZipFile(VORLAGE) as zin, zipfile.ZipFile(ziel, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if "/tables/" in info.filename and b"Tabelle6" in data:
+                data = data.replace(b"<table ", b'<table totalsRowCount="1" ', 1)
+            zout.writestr(info, data)
+    (tmp_path / "Belege").mkdir()
+    with pytest.raises(VorlagenFehler, match="Ergebniszeile"):
+        verarbeiten(VORLAGE, tmp_path / "Belege", ziel)
+
+
+def test_nachgetragener_preis_kein_neues_duplikat(tmp_path, monkeypatch):
+    import pymupdf
+    import verarbeitung
+    original = verarbeitung.zeilen_aus_beleg
+
+    def ohne_kraftstoffpreis(daten, quelle):
+        zeilen = original(daten, quelle)
+        for z in zeilen:
+            if z.liter != "Wäsche":
+                z.preis = None
+        return zeilen
+
+    monkeypatch.setattr(verarbeitung, "zeilen_aus_beleg", ohne_kraftstoffpreis)
+    belege = tmp_path / "Belege"
+    belege.mkdir()
+    doc = pymupdf.open()
+    doc.new_page().insert_text((40, 60), BELEG_TEXT, fontsize=9)
+    doc.save(belege / "a.pdf")
+    ziel = tmp_path / "Tanken.xlsx"
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    kraftstoff = [(n, z) for n, z in erg.zeilen if z.liter != "Wäsche"]
+    assert kraftstoff and kraftstoff[0][1].preis is None
+    wb = openpyxl.load_workbook(ziel)
+    wb["Eintragungen"].cell(kraftstoff[0][0], 6).value = 101.41
+    wb.save(ziel)
+    erg2 = verarbeiten(VORLAGE, belege, ziel)
+    assert erg2.zeilen == []

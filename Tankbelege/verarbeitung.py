@@ -102,7 +102,8 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
                 and abs(daten.summe - daten.kraftstoff_preis - (daten.waesche_preis or 0)) > 0.02):
             hinweise.append(f"{seite.name}: Summe {daten.summe:.2f} passt nicht zu Kraftstoff + Wäsche – bitte prüfen.")
         for z in zeilen_aus_beleg(daten, seite.name):
-            if z.key() in gesehen:
+            # Ohne erkannten Preis zählt auch ein Eintrag, dessen Preis nachträglich ergänzt wurde.
+            if z.key() in gesehen or (z.preis is None and z.key()[:3] in {k[:3] for k in gesehen}):
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Duplikat übersprungen ({_zeile_text(z)})")
                 continue
