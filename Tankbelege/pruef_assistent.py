@@ -250,6 +250,17 @@ def _korrektur_merken(ziel: Path, alt: PruefZeile) -> None:
         datei.write_text(json.dumps(daten, ensure_ascii=False, indent=1), "utf-8")
 
 
+def korrekturen_loeschen(ziel: Path) -> None:
+    """Neue Ziel-Datei: einen Korrekturverlauf einer früheren Datei gleichen Namens verwerfen."""
+    datei = _korrekturen_datei(ziel)
+    try:
+        daten = json.loads(datei.read_text("utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(daten, dict) and daten.pop(Path(ziel).name, None) is not None:
+        datei.write_text(json.dumps(daten, ensure_ascii=False, indent=1), "utf-8")
+
+
 def korrekturen_laden(ziel: Path) -> list[tuple]:
     """Schlüssel (Endziffer, Datum, Liter, Preis) der im Prüf-Assistenten korrigierten Original-Werte."""
     try:

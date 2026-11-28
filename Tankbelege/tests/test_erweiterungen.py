@@ -919,3 +919,13 @@ def test_korrektur_ohne_endziffer_unterdrueckt_andere_fahrzeuge_nicht(tmp_path):
     alt = Zeile(None, date(2026, 1, 20), "Wäsche", 11.49).key()
     assert v._korrigiert(alt, [alt])
     assert not v._korrigiert(Zeile("545E", date(2026, 1, 20), "Wäsche", 11.49).key(), [alt])
+
+
+def test_neue_ziel_datei_verwirft_alten_korrekturverlauf(tmp_path):
+    belege, ziel = _gelbe_datei(tmp_path)
+    erste, _ = pa.gelbe_zeilen(ziel)
+    pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40", "72,96", "11900"), erwartet=erste)
+    assert pa.korrekturen_laden(ziel)
+    ziel.rename(tmp_path / "archiv.xlsx")
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert len(erg.zeilen) == 2 and not pa.korrekturen_laden(ziel)

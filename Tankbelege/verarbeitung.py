@@ -178,7 +178,9 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     # Einträge, deren Preis in Excel ergänzt wurde, sollen ohne erkannten Preis nicht erneut erscheinen.
     nachgetragen = {schluessel(k)[:3] for k in excel.vorhandene if k[3] is not None}
     eintraege = [schluessel(k) for k in excel.eintraege]
-    korrigiert = [schluessel(k) for k in pruef_assistent.korrekturen_laden(ziel)] if anhaengen else []
+    if not anhaengen:
+        pruef_assistent.korrekturen_loeschen(ziel)
+    korrigiert = [schluessel(k) for k in pruef_assistent.korrekturen_laden(ziel)]
     neue: list[Zeile] = []
     ergaenzen: dict[int, Zeile] = {}
     gelesen: list[tuple] = []
