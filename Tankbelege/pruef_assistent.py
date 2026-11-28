@@ -482,7 +482,7 @@ class PruefFenster:
         self.tk = tk
         self.ziel, self.belege_ordner, self.bei_aenderung = Path(ziel), belege_ordner, bei_aenderung
         self.zeilen = gelbe_zeilen(self.ziel)
-        self.pos = 0
+        self.pos, self.uebersprungen = 0, 0
         self.bild: Image.Image | None = None
         self.zoom, self.drehung, self.auto_einpassen, self.auto_marke = 1.0, 0, True, False
         self._foto = None
@@ -535,7 +535,7 @@ class PruefFenster:
             self.felder[key] = var
         self.speichern_btn = ttk.Button(knoepfe, text="Speichern & Nächster", command=self._speichern)
         self.speichern_btn.pack(side="left")
-        ttk.Button(knoepfe, text="Überspringen", command=self._weiter).pack(side="left", padx=4)
+        ttk.Button(knoepfe, text="Überspringen", command=self._ueberspringen).pack(side="left", padx=4)
         ttk.Button(knoepfe, text="Schließen", command=w.destroy).pack(side="right")
 
         self.canvas.bind("<Configure>", lambda _e: self._anpassen())
@@ -549,7 +549,8 @@ class PruefFenster:
     # Anzeige
     def _laden(self):
         if self.pos >= len(self.zeilen):
-            self.titel.set("Keine gelben Belege mehr – alles geprüft.")
+            self.titel.set(f"Keine weiteren gelben Belege – {self.uebersprungen} übersprungen, noch offen."
+                           if self.uebersprungen else "Keine gelben Belege mehr – alles geprüft.")
             self.hinweis.configure(text="")
             self.bild = None
             self.marken = []
@@ -683,6 +684,11 @@ class PruefFenster:
                 self._einpassen()
 
     # Aktionen
+    def _ueberspringen(self):
+        if self.pos < len(self.zeilen):
+            self.uebersprungen += 1
+        self._weiter()
+
     def _weiter(self):
         self.pos += 1
         self._laden()

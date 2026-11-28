@@ -749,8 +749,8 @@ def test_pruef_fenster(tmp_path):
         f.felder["endziffer"].set("1800")
         f._speichern()
         assert f.titel.get() == "Beleg 2 von 2 – Excel-Zeile 4"
-        f._weiter()
-        assert f.titel.get().startswith("Keine gelben Belege mehr")
+        f._ueberspringen()
+        assert f.titel.get() == "Keine weiteren gelben Belege – 1 übersprungen, noch offen."
         assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [4]
     finally:
         root.destroy()
