@@ -266,7 +266,7 @@ class App:
                     self.letztes_ziel = erg.ziel
                     self._schreibe("\n".join(erg.zusammenfassung()))
                     for n, z in erg.zeilen:
-                        self._schreibe(f"  Zeile {n}: {_zeile_text(z)}")
+                        self._schreibe(f"  Zeile {n}: {_zeile_text(z, hinweis=True)}")
                     modus = "Angehängt an" if erg.angehaengt else "Gespeichert"
                     self._schreibe(f"{modus}: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
                     self.status.set(f"Fertig – {len(erg.zeilen)} Zeilen, {len(erg.hinweise)} Hinweise")
@@ -319,7 +319,7 @@ def cli(argv) -> int:
         print(f"FEHLER: {exc}", file=sys.stderr)
         return 1
     for n, z in erg.zeilen:
-        print(f"Zeile {n}: {_zeile_text(z)}")
+        print(f"Zeile {n}: {_zeile_text(z, hinweis=True)}")
     print("\n".join(erg.zusammenfassung()))
     print(f"{'Angehängt an' if erg.angehaengt else 'Gespeichert'}: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
     return 0

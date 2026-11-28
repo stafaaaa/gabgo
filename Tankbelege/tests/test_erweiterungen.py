@@ -364,3 +364,63 @@ def test_390_und_390e_sind_dasselbe_fahrzeug_fuer_duplikate(tmp_path):
     _pdf(belege, "b.pdf", text.format("390E"))
     erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
     assert len(erg.zeilen) == 1 and erg.duplikate == 1
+
+
+def _eintragungen(ziel):
+    return [r for r in openpyxl.load_workbook(ziel)["Eintragungen"].iter_rows(min_row=3, max_col=8, values_only=True)]
+
+
+def test_pruefhinweis_in_spalte_h_und_gelb(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Diesel 40,00 l 70,00\n1,750 €/l\nSumme 70,00\n20.01.2026\nKennzeichen GE EL 1800")
+    ziel = tmp_path / "z.xlsx"
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    (zeile,) = _eintragungen(ziel)
+    assert zeile[0] == 1800 and zeile[4] == 40.0 and zeile[5] == 70.0 and zeile[6] is None
+    assert zeile[7] == "* Bitte prüfen/vervollständigen: Handschrift/km fehlt oder unleserlich (a.pdf, Seite 1)"
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws["H1"].value == "Prüfhinweis" and ws.tables["Tabelle6"].ref == "A1:G3"
+    regeln = [r for cf in ws.conditional_formatting for r in cf.rules]
+    assert [r.formula for r in regeln] == [['LEFT($H3,1)="*"']]
+    assert regeln[0].dxf.fill.bgColor.rgb == "FFFFF2CC"
+    assert "Mit Prüfhinweis (gelb):    1 Zeilen" in erg.zusammenfassung()
+    _pdf(belege, "b.pdf", "Super 30,00 l 52,50\n1,750 €/l\nSumme 52,50\n21.01.2026\nKennzeichen GE EL 1800")
+    verarbeiten(VORLAGE, belege, ziel)
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert len([r for cf in ws.conditional_formatting for r in cf.rules]) == 1 and ws.max_row == 4
+
+
+def test_vollstaendiger_beleg_ohne_pruefhinweis(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Diesel 40,00 l 70,00\n1,750 €/l\nSumme 70,00\n20.01.2026\nKennzeichen GE EL 1800\nKilometerstand 5000")
+    ziel = tmp_path / "z.xlsx"
+    verarbeiten(VORLAGE, belege, ziel)
+    assert _eintragungen(ziel)[0][7] is None
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws["H1"].value is None and not list(ws.conditional_formatting)
+
+
+def test_fehlende_endziffer_wird_mit_hinweis_eingetragen(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Diesel 40,00 l 70,00\n1,750 €/l\nSumme 70,00\n20.01.2026\nKilometerstand 5000")
+    ziel = tmp_path / "z.xlsx"
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    (zeile,) = _eintragungen(ziel)
+    assert zeile[0] is None and zeile[3].date() == date(2026, 1, 20) and zeile[5] == 70.0
+    assert "Endziffer/Kennzeichen fehlt" in zeile[7] and erg.uebersprungen == 0
+    # zweiter Lauf: nicht doppelt, auch nachdem die Endziffer von Hand ergänzt wurde
+    assert verarbeiten(VORLAGE, belege, ziel).zeilen == []
+    wb = openpyxl.load_workbook(ziel)
+    wb["Eintragungen"]["A3"] = 1800
+    wb.save(ziel)
+    assert verarbeiten(VORLAGE, belege, ziel).zeilen == []
+
+
+def test_nur_summe_erkannt_wird_mit_hinweis_eingetragen(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Shop\nSumme 23,40\n20.01.2026\nKennzeichen GE EL 1800")
+    ziel = tmp_path / "z.xlsx"
+    verarbeiten(VORLAGE, belege, ziel)
+    (zeile,) = _eintragungen(ziel)
+    assert zeile[0] == 1800 and zeile[4] is None and zeile[5] == 23.4
+    assert "Position unklar, nur Summe erkannt" in zeile[7]

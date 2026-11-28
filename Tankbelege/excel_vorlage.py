@@ -24,6 +24,14 @@ TABELLE = "Tabelle6"
 SPALTEN = ["Endziffer", "Kfz", "Fahrer", "Datum", "Liter", "Preis", "Kilometerstand"]
 WAESCHE = "Wäsche"
 ERSTE_DATENZEILE = 3
+PRUEF_TITEL = "Prüfhinweis"
+PRUEF_FORMEL = 'LEFT($H3,1)="*"'
+PRUEF_FARBE = "FFFFF2CC"  # hellgelb
+# Elemente, die im Arbeitsblatt-XML nach <conditionalFormatting> stehen müssen
+NACH_BEDINGT = ("dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup", "headerFooter",
+                "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors", "smartTags",
+                "drawing", "legacyDrawing", "legacyDrawingHF", "picture", "oleObjects", "controls",
+                "webPublishItems", "tableParts", "extLst")
 
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
       "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -38,17 +46,18 @@ class VorlagenFehler(Exception):
 
 @dataclass
 class Zeile:
-    endziffer: object
-    datum: date
-    liter: object  # float oder "Wäsche"
+    endziffer: object  # None = nicht erkannt
+    datum: date | None
+    liter: object  # float, "Wäsche" o. Ä. oder None (nicht erkannt)
     preis: float | None
     kilometerstand: int | None = None
     quelle: str = ""
+    pruefhinweis: str = ""  # Spalte H, z. B. "* Bitte prüfen/vervollständigen: ..."
 
     def key(self):
-        liter = self.liter if isinstance(self.liter, str) else round(float(self.liter), 2)
+        liter = self.liter if self.liter is None or isinstance(self.liter, str) else round(float(self.liter), 2)
         preis = None if self.preis is None else round(float(self.preis), 2)
-        return (str(self.endziffer).upper(), self.datum, liter, preis)
+        return ("" if self.endziffer is None else str(self.endziffer).upper(), self.datum, liter, preis)
 
 
 def _excel_serial(d: date) -> int:
@@ -119,16 +128,23 @@ class ExcelVorlage:
             for r in wb[SHEET_LISTE].iter_rows(min_row=2, max_col=3, values_only=True)
             if r and r[0] not in (None, "")
         ])
-        self.vorhandene: set = set()
+        self.vorhandene: set = set()  # vollständige Einträge (Endziffer und Datum)
+        self.eintraege: list[tuple] = []  # alle Einträge, auch unvollständige
         for r in wb[SHEET_EINTRAG].iter_rows(min_row=ERSTE_DATENZEILE, max_col=7, values_only=True):
-            if not r or r[0] in (None, "") or r[3] is None:
+            if not r:
                 continue
+            r = tuple(r) + (None,) * (7 - len(r))
             d = r[3].date() if isinstance(r[3], datetime) else r[3]
             if not isinstance(d, date):
+                d = None
+            if all(v in (None, "") for v in (r[0], d, r[4], r[5], r[6])):
                 continue
-            liter = r[4] if isinstance(r[4], str) else (r[4] if r[4] is None else float(r[4]))
+            liter = r[4] if r[4] is None or isinstance(r[4], str) else float(r[4])
             preis = None if r[5] in (None, "") else float(r[5])
-            self.vorhandene.add(Zeile(r[0], d, liter, preis).key())
+            key = Zeile(None if r[0] in (None, "") else r[0], d, liter, preis).key()
+            self.eintraege.append(key)
+            if r[0] not in (None, "") and d is not None:
+                self.vorhandene.add(key)
         wb.close()
 
     def endziffer_bekannt(self, value) -> Fahrzeug | None:
@@ -180,8 +196,10 @@ class ExcelVorlage:
         for i, z in enumerate(zeilen):
             n = start + i
             numbers.append(n)
-            fz = self.endziffer_bekannt(z.endziffer)
-            cells = [self._value_cell(f"A{n}", fz.endziffer if fz else z.endziffer, strings)]
+            fz = self.endziffer_bekannt(z.endziffer) if z.endziffer not in (None, "") else None
+            cells = []
+            if fz or z.endziffer not in (None, ""):
+                cells.append(self._value_cell(f"A{n}", fz.endziffer if fz else z.endziffer, strings))
             for col, idx in (("B", 1), ("C", 2)):
                 f, style = formulas[col]
                 if fz:
@@ -189,20 +207,27 @@ class ExcelVorlage:
                     cells.append(f'<c r="{col}{n}"{style} t="str"><f>{f}</f><v>{escape(str(cached))}</v></c>')
                 else:
                     cells.append(f'<c r="{col}{n}"{style} t="e"><f>{f}</f><v>#N/A</v></c>')
-            cells.append(f'<c r="D{n}" s="{date_style}"><v>{_excel_serial(z.datum)}</v></c>')
-            cells.append(self._value_cell(f"E{n}", z.liter, strings))
+            if z.datum is not None:
+                cells.append(f'<c r="D{n}" s="{date_style}"><v>{_excel_serial(z.datum)}</v></c>')
+            if z.liter is not None:
+                cells.append(self._value_cell(f"E{n}", z.liter, strings))
             if z.preis is not None:
                 cells.append(self._value_cell(f"F{n}", z.preis, strings))
             if z.kilometerstand is not None:
                 cells.append(self._value_cell(f"G{n}", z.kilometerstand, strings))
+            if z.pruefhinweis:
+                cells.append(self._value_cell(f"H{n}", z.pruefhinweis, strings))
             if n in later:
                 fremd = _fremde_zellen(later.pop(n))
+                if z.pruefhinweis:
+                    fremd = [c for c in fremd if not c.startswith(f'<c r="H{n}"')]
                 attrs = re.match(r"<row ([^>]*?)/?>", rows[n].group(0)).group(1)
                 attrs = " ".join(a for a in re.findall(r'[\w:]+="[^"]*"', attrs)
                                  if a.split("=")[0] not in ("r", "spans", "hidden"))
                 new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells + fremd) + "</row>"))
             else:
-                new_xml.append((n, f'<row r="{n}" {row_attrs}>' + "".join(cells) + "</row>"))
+                attrs = _spans_bis_h(row_attrs) if z.pruefhinweis else row_attrs
+                new_xml.append((n, f'<row r="{n}" {attrs}>' + "".join(cells) + "</row>"))
         new_xml += [(n, xml) for n, xml in later.items() if n not in removable]
         new_xml = [xml for _, xml in sorted(new_xml)]
         last = (numbers[-1] if numbers else max(start - 1, 2))
@@ -211,7 +236,11 @@ class ExcelVorlage:
             sheet = sheet.replace("</sheetData>", "".join(new_xml) + "</sheetData>", 1)
         else:
             sheet = sheet.replace("<sheetData/>", "<sheetData>" + "".join(new_xml) + "</sheetData>", 1)
-        sheet = re.sub(r'(<dimension ref=")[^"]*(")', lambda m: m.group(1) + _dimension(m.group(0), last) + m.group(2),
+        pruefung = any(z.pruefhinweis for z in zeilen)
+        if pruefung:
+            sheet = self._pruefspalte(sheet, parts, strings)
+        sheet = re.sub(r'(<dimension ref=")[^"]*(")',
+                       lambda m: m.group(1) + _dimension(m.group(0), last, "H" if pruefung else "G") + m.group(2),
                        sheet, 1)
         parts[self.sheet_part] = _bereich_erweitern(sheet, liste_ende).encode("utf-8")
 
@@ -294,6 +323,62 @@ class ExcelVorlage:
                 parts[target] = t.encode("utf-8")
         return ende
 
+    def _pruefspalte(self, sheet: str, parts, strings) -> str:
+        """Spalte H "Prüfhinweis" neben Tabelle6: Überschrift, Breite und hellgelbe Markierung
+        (bedingte Formatierung, verschwindet, sobald der Hinweis gelöscht wird)."""
+        kopf = ROW_RE.search(sheet)
+        if kopf and kopf.group(1) == "1" and 'r="H1"' not in kopf.group(0) and kopf.group(0).endswith("</row>"):
+            g1 = next((m for m in CELL_RE.finditer(kopf.group(0)) if m.group(1) == "G"), None)
+            stil = (re.search(r'\ss="\d+"', g1.group(3)) or [""])[0] if g1 else ""
+            zeile = kopf.group(0)[:-len("</row>")] + self._value_cell("H1", PRUEF_TITEL, strings, stil) + "</row>"
+            zeile = re.sub(r"^<row [^>]*>", lambda m: _spans_bis_h(m.group(0)), zeile)
+            sheet = sheet[:kopf.start()] + zeile + sheet[kopf.end():]
+        spalte = '<col min="8" max="8" width="70" customWidth="1"/>'
+        cols = re.search(r"<cols>(.*?)</cols>", sheet, re.S)
+        if cols is None:
+            sheet = sheet.replace("<sheetData", f"<cols>{spalte}</cols><sheetData", 1)
+        else:
+            bereiche = [(int(a), int(b)) for a, b in re.findall(r'<col\b[^>]*?min="(\d+)"[^>]*?max="(\d+)"', cols.group(1))]
+            if not any(a <= 8 <= b for a, b in bereiche):
+                danach = next((m for m in re.finditer(r'<col\b[^>]*?min="(\d+)"[^>]*/>', cols.group(1))
+                               if int(m.group(1)) > 8), None)
+                innen = cols.group(1)
+                innen = innen[:danach.start()] + spalte + innen[danach.start():] if danach else innen + spalte
+                sheet = sheet[:cols.start()] + f"<cols>{innen}</cols>" + sheet[cols.end():]
+        if PRUEF_FORMEL.replace('"', "&quot;") in sheet or PRUEF_FORMEL in sheet:
+            return sheet
+        dxf = self._gelb_dxf(parts)
+        prio = max([int(p) for p in re.findall(r'<cfRule\b[^>]*?priority="(\d+)"', sheet)] + [0]) + 1
+        regel = (f'<conditionalFormatting sqref="A{ERSTE_DATENZEILE}:H1048576"><cfRule type="expression" '
+                 f'dxfId="{dxf}" priority="{prio}"><formula>{escape(PRUEF_FORMEL)}</formula></cfRule>'
+                 "</conditionalFormatting>")
+        letzte = list(re.finditer(r"</conditionalFormatting>", sheet))
+        if letzte:
+            pos = letzte[-1].end()
+        else:
+            treffer = [m.start() for t in NACH_BEDINGT for m in [re.search(rf"<{t}\b", sheet)] if m]
+            pos = min(treffer) if treffer else sheet.rindex("</worksheet>")
+        return sheet[:pos] + regel + sheet[pos:]
+
+    def _gelb_dxf(self, parts) -> int:
+        if not self.styles_part:
+            raise VorlagenFehler("styles.xml fehlt.")
+        styles = parts[self.styles_part].decode("utf-8")
+        dxf = f'<dxf><fill><patternFill patternType="solid"><bgColor rgb="{PRUEF_FARBE}"/></patternFill></fill></dxf>'
+        m = re.search(r'<dxfs\b[^>]*?(?:/>|>(.*?)</dxfs>)', styles, re.S)
+        if m:
+            vorhanden = re.findall(r"<dxf\b.*?</dxf>|<dxf/>", m.group(1) or "", re.S)
+            neu = f'<dxfs count="{len(vorhanden) + 1}">' + (m.group(1) or "") + dxf + "</dxfs>"
+            styles = styles[:m.start()] + neu + styles[m.end():]
+            idx = len(vorhanden)
+        else:
+            anker = re.search(r"</cellStyles>|<cellStyles\b[^>]*/>", styles)
+            pos = anker.end() if anker else styles.index("</cellXfs>") + len("</cellXfs>")
+            styles = styles[:pos] + f'<dxfs count="1">{dxf}</dxfs>' + styles[pos:]
+            idx = 0
+        parts[self.styles_part] = styles.encode("utf-8")
+        return idx
+
     def _value_cell(self, ref: str, value, strings, style: str = "") -> str:
         if isinstance(value, str):
             if strings is None:
@@ -342,11 +427,15 @@ def _bereich_erweitern(xml: str, letzte_zeile: int) -> str:
     return LISTE_BEREICH.sub(lambda m: m.group(1) + str(max(int(m.group(2)), letzte_zeile)), xml)
 
 
-def _dimension(tag: str, last_row: int) -> str:
+def _spans_bis_h(attrs: str) -> str:
+    return re.sub(r'spans="(\d+):(\d+)"', lambda m: f'spans="{m.group(1)}:{max(int(m.group(2)), 8)}"', attrs)
+
+
+def _dimension(tag: str, last_row: int, min_col: str = "G") -> str:
     m = re.search(r':([A-Z]+)(\d+)"', tag)
-    col, row = ("G", last_row) if not m else (m.group(1), int(m.group(2)))
-    if _col_nr(col) < 7:
-        col = "G"
+    col, row = (min_col, last_row) if not m else (m.group(1), int(m.group(2)))
+    if _col_nr(col) < _col_nr(min_col):
+        col = min_col
     return f"A1:{col}{max(row, last_row)}"
 
 

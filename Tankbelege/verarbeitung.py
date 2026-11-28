@@ -5,7 +5,7 @@ import os
 import time
 import zipfile
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -48,6 +48,7 @@ class Ergebnis:
             f"Neu in Ziel-Excel:         {len(nummern)} Zeilen{bereich}",
             f"Duplikate übersprungen:    {self.duplikate}",
             f"Nicht übernommen:          {self.uebersprungen}",
+            f"Mit Prüfhinweis (gelb):    {sum(1 for _, z in self.zeilen if z.pruefhinweis)} Zeilen",
         ] + ([f"Neue Fahrzeuge angelegt:   {', '.join(str(f.endziffer) for f in self.neue_fahrzeuge)}"]
              if self.neue_fahrzeuge else [])
 
@@ -112,7 +113,7 @@ def pruefe_ziel_frei(ziel: Path):
 
 
 def zeilen_aus_beleg(daten: bc.BelegDaten, quelle: str) -> list[Zeile]:
-    endziffer = daten.fahrzeug.endziffer
+    endziffer = daten.fahrzeug.endziffer if daten.fahrzeug else None
     zeilen = []
     if daten.hat_kraftstoff:
         zeilen.append(Zeile(endziffer, daten.datum, daten.menge, daten.kraftstoff_preis,
@@ -173,6 +174,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     gesehen = {schluessel(k) for k in excel.vorhandene}
     # Einträge, deren Preis in Excel ergänzt wurde, sollen ohne erkannten Preis nicht erneut erscheinen.
     nachgetragen = {schluessel(k)[:3] for k in excel.vorhandene if k[3] is not None}
+    eintraege = [schluessel(k) for k in excel.eintraege]
     neue: list[Zeile] = []
     fortschritt(0, gesamt, "Starte ...")
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
@@ -196,7 +198,11 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         for h in daten.hinweise:
             hinweise.append(f"{seite.name}: {h}")
         fehlt = daten.fehlende_pflichtfelder()
-        if daten.fahrzeug is None or daten.datum is None or not zeilen_aus_beleg(daten, seite.quelle):
+        zeilen = zeilen_aus_beleg(daten, seite.quelle)
+        if not zeilen and (daten.fahrzeug is not None or daten.summe):
+            zeilen = [Zeile(daten.fahrzeug.endziffer if daten.fahrzeug else None, daten.datum, None,
+                            daten.summe, None, seite.quelle)]
+        if not zeilen:
             roh = f" (gelesen: '{daten.kennzeichen_roh}')" if daten.kennzeichen_roh and daten.fahrzeug is None else ""
             betrag = f" Bezahlter Betrag laut Beleg: {_eur(daten.summe)} – bitte von Hand eintragen." \
                 if daten.summe else ""
@@ -205,7 +211,8 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
             ergebnis.uebersprungen += 1
             continue
         if fehlt:
-            hinweise.append(f"{seite.name}: übernommen, aber bitte prüfen – fehlt: {', '.join(fehlt)}")
+            roh = f" (gelesen: '{daten.kennzeichen_roh}')" if daten.kennzeichen_roh and daten.fahrzeug is None else ""
+            hinweise.append(f"{seite.name}: übernommen mit Prüfhinweis – fehlt: {', '.join(fehlt)}{roh}")
         if daten.hat_kraftstoff and daten.kilometerstand is None:
             hinweise.append(f"{seite.name}: Kilometerstand nicht erkannt.")
         rest = daten.rest()
@@ -215,9 +222,14 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         elif rest is not None and rest < -0.02:
             hinweise.append(f"{seite.name}: erfasste Positionen ({_eur(daten.erfasst())}) übersteigen die Summe "
                             f"{_eur(daten.summe)} – bitte prüfen.")
-        neu_angelegt = daten.fahrzeug.neu and daten.fahrzeug not in ergebnis.neue_fahrzeuge
+        neu_angelegt = daten.fahrzeug is not None and daten.fahrzeug.neu and daten.fahrzeug not in ergebnis.neue_fahrzeuge
         vorher = len(neue)
-        for z in zeilen_aus_beleg(daten, seite.quelle):
+        for z in _mit_pruefhinweis(daten, zeilen):
+            if _unvollstaendig(z) and any(_teil_gleich(schluessel(z.key()), k) for k in eintraege):
+                ergebnis.duplikate += 1
+                hinweise.append(f"{seite.name}: unvollständiger Eintrag steht schon in der Datei – "
+                                f"übersprungen ({_zeile_text(z)})")
+                continue
             if z.preis is None and schluessel(z.key())[:3] in nachgetragen:
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Preis nicht erkannt, gleicher Eintrag mit Preis steht schon in "
@@ -228,6 +240,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
                 hinweise.append(f"{seite.name}: Duplikat übersprungen ({_zeile_text(z)})")
                 continue
             gesehen.add(schluessel(z.key()))
+            eintraege.append(schluessel(z.key()))
             neue.append(z)
         if neu_angelegt and len(neue) > vorher:
             fz = daten.fahrzeug
@@ -243,6 +256,63 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     _schreibe_pruefung(ergebnis, vorlage, belege_ordner, ki)
     fortschritt(gesamt, gesamt, "Fertig")
     return ergebnis
+
+
+def _unvollstaendig(z: Zeile) -> bool:
+    return z.endziffer in (None, "") or z.datum is None or z.liter is None
+
+
+def _teil_gleich(neu: tuple, alt: tuple) -> bool:
+    """Unvollständiger Eintrag gilt als vorhanden, wenn ein Eintrag in allen erkannten Feldern übereinstimmt
+    (z. B. nachdem die fehlende Endziffer von Hand ergänzt wurde)."""
+    if neu[1] is None and neu[3] is None:
+        return False
+    return all(n in (None, "") or n == a for n, a in zip(neu, alt))
+
+
+def _mit_pruefhinweis(daten: bc.BelegDaten, zeilen: list[Zeile]) -> list[Zeile]:
+    """Spalte H: fehlende oder unsicher gelesene Felder je Zeile, mit Verweis auf Datei und Seite."""
+    unsicher = {h.split(":")[0].removeprefix("OCR unsicher bei ").strip()
+                for h in daten.hinweise if h.startswith("OCR unsicher bei ")}
+    beleg = []
+    if daten.fahrzeug is None:
+        beleg.append("Endziffer/Kennzeichen fehlt")
+    elif "fahrzeug" in unsicher or any(h.startswith(("unsichere Zuordnung", "unsicher: Kennzeichen"))
+                                       for h in daten.hinweise):
+        beleg.append("Endziffer unsicher")
+    if daten.datum is None:
+        beleg.append("Datum fehlt")
+    elif "datum" in unsicher:
+        beleg.append("Datum unsicher")
+    rest = daten.rest()
+    if rest is not None and abs(rest) <= 0.02:  # Summe bestätigt die gewählten Beträge
+        unsicher -= {"kraftstoff_preis", "waesche_preis"}
+    aus = []
+    for i, z in enumerate(zeilen):
+        gruende = list(beleg)
+        if z.liter is None:
+            gruende.append("Position unklar, nur Summe erkannt" if z.preis else "Position und Betrag fehlen")
+        elif not isinstance(z.liter, str):
+            if "menge" in unsicher:
+                gruende.append("Liter unsicher")
+            if z.preis is None:
+                gruende.append("Preis fehlt")
+            elif "kraftstoff_preis" in unsicher:
+                gruende.append("Preis unsicher")
+            if z.kilometerstand is None:
+                gruende.append("Handschrift/km fehlt oder unleserlich")
+            elif "kilometerstand" in unsicher:
+                gruende.append("Handschrift/km unsicher")
+        elif z.liter == WAESCHE and "waesche_preis" in unsicher:
+            gruende.append("Preis unsicher")
+        if i == 0 and z.liter is not None and rest is not None and abs(rest) > 0.02:
+            gruende.append(f"{_eur(rest)} keiner Position zugeordnet" if rest > 0
+                           else "Positionen übersteigen die Summe")
+        if gruende:
+            ref = z.quelle.replace(" | ", ", ")
+            z = replace(z, pruefhinweis=f"* Bitte prüfen/vervollständigen: {', '.join(gruende)} ({ref})")
+        aus.append(z)
+    return aus
 
 
 def _kurz(d: bc.BelegDaten) -> str:
@@ -263,10 +333,12 @@ def _eur(v) -> str:
     return "?" if v is None else f"{v:.2f} €".replace(".", ",")
 
 
-def _zeile_text(z: Zeile) -> str:
-    liter = z.liter if isinstance(z.liter, str) else f"{z.liter:.2f}".replace(".", ",")
-    return (f"{z.endziffer} | {z.datum.strftime('%d.%m.%Y')} | {liter} | {_eur(z.preis)} | "
+def _zeile_text(z: Zeile, hinweis: bool = False) -> str:
+    liter = "?" if z.liter is None else z.liter if isinstance(z.liter, str) else f"{z.liter:.2f}".replace(".", ",")
+    text = (f"{'?' if z.endziffer in (None, '') else z.endziffer} | "
+            f"{z.datum.strftime('%d.%m.%Y') if z.datum else '?'} | {liter} | {_eur(z.preis)} | "
             f"{z.kilometerstand if z.kilometerstand is not None else ''}")
+    return text + (f" | {z.pruefhinweis}" if hinweis and z.pruefhinweis else "")
 
 
 def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ki: ki_anbieter.KiEinstellung):
@@ -282,7 +354,8 @@ def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ki: ki_anbieter
         "",
         "Neue Zeilen (Excel-Zeile | Endziffer | Datum | Liter | Preis | Kilometerstand | Quelle):",
     ]
-    lines += [f"  {n:>4} | {_zeile_text(z)} | {z.quelle}" for n, z in e.zeilen] or ["  (keine)"]
+    lines += [f"  {n:>4} | {_zeile_text(z)} | {z.quelle}" + (f" | {z.pruefhinweis}" if z.pruefhinweis else "")
+              for n, z in e.zeilen] or ["  (keine)"]
     lines += ["", "Hinweise und Fehler:"]
     lines += [f"  - {h}" for h in e.hinweise] or ["  (keine)"]
     text = "\n".join(lines) + "\n"
