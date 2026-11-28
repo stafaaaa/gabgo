@@ -235,17 +235,20 @@ def _korrekturen_datei(ziel: Path) -> Path:
     return Path(ziel).parent / VORSCHAU_ORDNER / KORREKTUREN
 
 
-def _korrektur_merken(ziel: Path, alt: PruefZeile) -> None:
-    """Die ursprünglich gelesenen Werte merken, damit ein erneuter Import desselben Scans sie nicht wieder einträgt."""
+def _korrektur_merken(ziel: Path, alt: PruefZeile, endziffer=None) -> None:
+    """Die ursprünglich gelesenen Werte merken, damit ein erneuter Import desselben Scans sie nicht wieder einträgt.
+    Fehlte die Endziffer, zusätzlich mit der ergänzten Endziffer (der Import ordnet sie evtl. über den KM-Verlauf zu)."""
     datei = _korrekturen_datei(ziel)
     try:
         daten = json.loads(datei.read_text("utf-8"))
     except (OSError, ValueError):
         daten = {}
-    eintrag = [alt.endziffer, alt.datum.isoformat() if alt.datum else None, alt.liter, alt.preis]
     liste = daten.setdefault(Path(ziel).name, [])
-    if eintrag not in liste:
-        liste.append(eintrag)
+    endziffern = [alt.endziffer] + ([endziffer] if alt.endziffer in (None, "", 0, "0") and endziffer else [])
+    neu = [e for e in ([ez, alt.datum.isoformat() if alt.datum else None, alt.liter, alt.preis] for ez in endziffern)
+           if e not in liste]
+    if neu:
+        liste.extend(neu)
         datei.parent.mkdir(parents=True, exist_ok=True)
         datei.write_text(json.dumps(daten, ensure_ascii=False, indent=1), "utf-8")
 
@@ -292,7 +295,7 @@ def zeile_speichern(ziel: Path, n: int, z: Zeile, erwartet: PruefZeile | None = 
         art = "datei"
     if erwartet is not None and Zeile(erwartet.endziffer, erwartet.datum, erwartet.liter, erwartet.preis).key() \
             != replace(z, endziffer=fz.endziffer if fz else z.endziffer).key():
-        _korrektur_merken(ziel, erwartet)
+        _korrektur_merken(ziel, erwartet, fz.endziffer if fz else z.endziffer)
     return art
 
 

@@ -929,3 +929,19 @@ def test_neue_ziel_datei_verwirft_alten_korrekturverlauf(tmp_path):
     ziel.rename(tmp_path / "archiv.xlsx")
     erg = verarbeiten(VORLAGE, belege, ziel)
     assert len(erg.zeilen) == 2 and not pa.korrekturen_laden(ziel)
+
+
+def test_korrektur_mit_ergaenzter_endziffer_wird_auch_nach_km_zuordnung_erkannt(tmp_path):
+    ohne = "Diesel 40,00 l 71,96\nSumme 71,96\n20.01.2026\nKilometerstand 5400"
+    mit = "Diesel 30,00 l 53,97\nSumme 53,97\n10.01.2026\nKennzeichen GE EL 1800\nKilometerstand 5000"
+    ziel = tmp_path / "z.xlsx"
+    _pdf(tmp_path / "B1", "b.pdf", ohne)
+    verarbeiten(VORLAGE, tmp_path / "B1", ziel)
+    (p,) = pa.gelbe_zeilen(ziel)
+    assert p.endziffer in (None, "")
+    pa.zeile_speichern(ziel, p.zeile, pa.werte_lesen("1800", "20.01.2026", "40", "72,96", "5400"), erwartet=p)
+    _pdf(tmp_path / "B2", "a.pdf", mit)
+    _pdf(tmp_path / "B2", "b.pdf", ohne)
+    erg = verarbeiten(VORLAGE, tmp_path / "B2", ziel)
+    assert [str(z.liter) for _, z in erg.zeilen] == ["30.0"]
+    assert len(_eintragungen(ziel)) == 2
