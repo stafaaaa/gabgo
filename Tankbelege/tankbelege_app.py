@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import BooleanVar, StringVar, Tk, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
+from excel_vorlage import VorlagenFehler
 from verarbeitung import verarbeiten, _zeile_text
 
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -197,8 +198,12 @@ def cli(argv) -> int:
     ap.add_argument("--ollama", action="store_true")
     a = ap.parse_args(argv)
     ziel = Path(a.ziel) if a.ziel else standard_ziel(Path(a.vorlage))
-    erg = verarbeiten(Path(a.vorlage), Path(a.belege), ziel, a.ollama,
-                      fortschritt=lambda x, g, t: print(f"[{x}/{g}] {t}"), log=print)
+    try:
+        erg = verarbeiten(Path(a.vorlage), Path(a.belege), ziel, a.ollama,
+                          fortschritt=lambda x, g, t: print(f"[{x}/{g}] {t}"), log=print)
+    except VorlagenFehler as exc:
+        print(f"FEHLER: {exc}", file=sys.stderr)
+        return 1
     for n, z in erg.zeilen:
         print(f"Zeile {n}: {_zeile_text(z)}")
     print("\n".join(erg.zusammenfassung()))

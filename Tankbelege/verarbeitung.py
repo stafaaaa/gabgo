@@ -1,7 +1,10 @@
 """Ablauf: Belege lesen -> Zeilen bilden -> neue .xlsx + *_pruefung.txt schreiben."""
 from __future__ import annotations
 
+import os
+import time
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +53,42 @@ def pruefung_pfad(ziel: Path) -> Path:
     return ziel.with_name(ziel.stem + "_pruefung.txt")
 
 
+SPERRE_VERALTET = 10 * 60  # Sekunden ohne Lebenszeichen, danach gilt eine Sperre als liegen geblieben
+
+
+def sperr_pfad(ziel: Path) -> Path:
+    return ziel.with_name(ziel.name + ".lock")
+
+
+@contextmanager
+def _ziel_sperre(ziel: Path, log):
+    """Verhindert, dass zwei Importe gleichzeitig in dieselbe Ziel-Datei schreiben."""
+    sperre = sperr_pfad(ziel)
+    for _ in range(2):
+        try:
+            fd = os.open(sperre, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                alter = time.time() - sperre.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if alter < SPERRE_VERALTET:
+                raise VorlagenFehler(
+                    f"In {ziel.name} schreibt gerade ein anderer Import (Sperrdatei {sperre.name}). "
+                    "Bitte warten, bis er fertig ist, und dann erneut starten.")
+            log(f"Alte Sperrdatei {sperre.name} von einem abgebrochenen Import wird entfernt.")
+            sperre.unlink(missing_ok=True)
+    else:
+        raise VorlagenFehler(f"Sperrdatei {sperre.name} konnte nicht angelegt werden.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(f"Import gestartet {datetime.now():%d.%m.%Y %H:%M:%S}, Prozess {os.getpid()}\n")
+    try:
+        yield lambda: os.utime(sperre)
+    finally:
+        sperre.unlink(missing_ok=True)
+
+
 def zeilen_aus_beleg(daten: bc.BelegDaten, quelle: str) -> list[Zeile]:
     endziffer = daten.fahrzeug.endziffer
     zeilen = []
@@ -71,6 +110,15 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
     if not belege_ordner.is_dir():
         raise VorlagenFehler(f"Belege-Ordner nicht gefunden: {belege_ordner}")
 
+    with _ziel_sperre(ziel, log) as lebenszeichen:
+        def melden(aktuell, gesamt, text):
+            lebenszeichen()
+            fortschritt(aktuell, gesamt, text)
+        return _verarbeiten(vorlage, belege_ordner, ziel, ollama, melden, log)
+
+
+def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool,
+                 fortschritt, log) -> Ergebnis:
     anhaengen = ziel.exists()
     if anhaengen:
         try:

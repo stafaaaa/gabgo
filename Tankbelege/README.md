@@ -32,6 +32,9 @@ Vorlage; Blätter, Spalten, Design und Zeile 2 bleiben unverändert, B/C erhalte
 Zeile 2, neue Zeilen beginnen ab Zeile 3. Existiert die Ziel-Datei bereits, werden neue Einträge unter der
 letzten belegten Zeile angehängt; Einträge, die dort schon stehen, werden übersprungen.
 Hinweise und Fehler stehen ausschließlich in `<Ziel>_pruefung.txt` (beim Anhängen wird das Protokoll ergänzt).
+Während eines Imports liegt neben der Ziel-Datei eine Sperrdatei `<Ziel>.xlsx.lock`. Ein zweiter Import in
+dieselbe Datei bricht dann mit einem Hinweis ab, statt Einträge zu überschreiben. Eine von einem abgestürzten
+Import liegen gebliebene Sperre wird nach 10 Minuten ohne Lebenszeichen automatisch entfernt.
 
 ## Tests
 

@@ -7,3 +7,4 @@ Tankbelege.exe
 *_pruefung.txt
 vendor/
 Output/
+*.xlsx.lock

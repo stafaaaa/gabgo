@@ -318,3 +318,26 @@ def test_nachgetragener_preis_kein_neues_duplikat(tmp_path, monkeypatch):
     wb.save(ziel)
     erg2 = verarbeiten(VORLAGE, belege, ziel)
     assert erg2.zeilen == []
+
+
+def test_paralleler_import_wird_abgewiesen(tmp_path):
+    import os
+    import time
+    import pymupdf
+    import verarbeitung
+    belege = tmp_path / "Belege"
+    belege.mkdir()
+    doc = pymupdf.open()
+    doc.new_page().insert_text((40, 60), BELEG_TEXT, fontsize=9)
+    doc.save(belege / "a.pdf")
+    ziel = tmp_path / "Tanken_test.xlsx"
+    sperre = verarbeitung.sperr_pfad(ziel)
+    sperre.write_text("anderer Import")
+    with pytest.raises(VorlagenFehler, match="anderer Import"):
+        verarbeiten(VORLAGE, belege, ziel)
+    assert not ziel.exists() and sperre.exists()
+
+    alt = time.time() - verarbeitung.SPERRE_VERALTET - 5
+    os.utime(sperre, (alt, alt))
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert len(erg.zeilen) == 2 and not sperre.exists()
