@@ -367,3 +367,5 @@ def test_fest_hinterlegte_vorlage_mit_fallback(tmp_path):
     shutil.copy(VORLAGE, programm / app.VORLAGE_NAME)
     assert app.finde_vorlage(programm, eingebettet) == programm / app.VORLAGE_NAME
     assert app.standard_ziel().parent == app.DATEN_DIR
+    assert app.standard_ziel(app.APP_DIR / "andere.xlsx").parent == app.DATEN_DIR
+    assert app.standard_ziel(tmp_path / "andere.xlsx").parent == tmp_path

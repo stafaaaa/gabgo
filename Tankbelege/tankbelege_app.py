@@ -62,7 +62,8 @@ if INSTALLIERT:
 
 
 def standard_ziel(vorlage: Path | None = None) -> Path:
-    eigene = vorlage is not None and Path(vorlage).resolve() != STANDARD_VORLAGE.resolve()
+    programm = {APP_DIR.resolve(), EINGEBETTET_DIR.resolve()}
+    eigene = vorlage is not None and Path(vorlage).resolve().parent not in programm
     ordner = Path(vorlage).parent if eigene else DATEN_DIR
     return ordner / f"Tanken_{date.today():%Y_%m}_ausgefuellt.xlsx"
 
