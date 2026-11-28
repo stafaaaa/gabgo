@@ -369,3 +369,12 @@ def test_fest_hinterlegte_vorlage_mit_fallback(tmp_path):
     assert app.standard_ziel().parent == app.DATEN_DIR
     assert app.standard_ziel(app.APP_DIR / "andere.xlsx").parent == app.DATEN_DIR
     assert app.standard_ziel(tmp_path / "andere.xlsx").parent == tmp_path
+
+
+def test_icon_enthaelt_alle_windows_groessen():
+    from PIL import Image
+    import tankbelege_app
+    ico = tankbelege_app.ICON_DIR / "anna.ico"
+    assert ico.is_file() and (tankbelege_app.ICON_DIR / "anna.png").is_file()
+    groessen = Image.open(ico).info["sizes"]
+    assert {(g, g) for g in (16, 24, 32, 48, 64, 128, 256)} <= groessen

@@ -20,6 +20,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
+SetupIconFile=assets\anna.ico
 UninstallDisplayIcon={app}\Tankbelege.exe
 UninstallDisplayName=Tankbelege
 

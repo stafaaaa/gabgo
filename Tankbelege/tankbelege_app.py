@@ -10,7 +10,7 @@ import threading
 import traceback
 from datetime import date
 from pathlib import Path
-from tkinter import BooleanVar, StringVar, Tk, filedialog, messagebox, ttk
+from tkinter import BooleanVar, PhotoImage, StringVar, Tk, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from excel_vorlage import VorlagenFehler
@@ -31,6 +31,7 @@ def finde_vorlage(app_dir: Path = APP_DIR, eingebettet: Path = EINGEBETTET_DIR) 
 
 
 STANDARD_VORLAGE = finde_vorlage() or APP_DIR / VORLAGE_NAME
+ICON_DIR = EINGEBETTET_DIR / "assets"
 
 
 def _dokumente() -> Path:
@@ -73,6 +74,7 @@ class App:
         self.root = root
         root.title("Tankbelege -> Excel")
         root.minsize(720, 480)
+        self._setze_icon()
         self.events: queue.Queue = queue.Queue()
         self.belege = StringVar(value=str(STANDARD_BELEGE) if STANDARD_BELEGE.is_dir() else "")
         self.ziel = StringVar(value=str(standard_ziel()))
@@ -104,6 +106,16 @@ class App:
         self.log.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(6, 0))
         frm.rowconfigure(6, weight=1)
         root.after(100, self._poll)
+
+    def _setze_icon(self):
+        try:
+            if os.name == "nt" and (ICON_DIR / "anna.ico").is_file():
+                self.root.iconbitmap(default=str(ICON_DIR / "anna.ico"))
+            elif (ICON_DIR / "anna.png").is_file():
+                self.icon = PhotoImage(file=str(ICON_DIR / "anna.png"))
+                self.root.iconphoto(True, self.icon)
+        except Exception:
+            pass
 
     def _waehle_ordner(self):
         p = filedialog.askdirectory(title="Belege-Ordner")

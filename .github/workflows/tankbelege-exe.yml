@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest pyinstaller
       - run: python -m pytest -q tests
-      - run: pyinstaller --noconfirm --onefile --windowed --add-data 'Tanken_neu - Kopie.xlsx;.' --name Tankbelege tankbelege_app.py
+      - run: pyinstaller --noconfirm --onefile --windowed --add-data 'Tanken_neu - Kopie.xlsx;.' --icon assets\anna.ico --add-data 'assets\anna.ico;assets' --add-data 'assets\anna.png;assets' --name Tankbelege tankbelege_app.py
       - name: EXE ohne danebenliegende Vorlage testen (eingebettete Vorlage)
         shell: pwsh
         run: |

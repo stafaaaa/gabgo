@@ -8,7 +8,7 @@ if not exist ".venv\Scripts\python.exe" (py -3 -m venv .venv 2>nul || python -m 
 if not exist ".venv\Scripts\python.exe" (echo Python 3 nicht gefunden. & goto fehler)
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt pyinstaller
 if errorlevel 1 goto fehler
-".venv\Scripts\pyinstaller.exe" --noconfirm --onedir --windowed --add-data "Tanken_neu - Kopie.xlsx;." --name Tankbelege tankbelege_app.py
+".venv\Scripts\pyinstaller.exe" --noconfirm --onedir --windowed --add-data "Tanken_neu - Kopie.xlsx;." --icon assets\anna.ico --add-data "assets\anna.ico;assets" --add-data "assets\anna.png;assets" --name Tankbelege tankbelege_app.py
 if errorlevel 1 goto fehler
 
 if not exist "vendor\tesseract\tesseract.exe" if exist "%ProgramFiles%\Tesseract-OCR\tesseract.exe" (
