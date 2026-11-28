@@ -314,8 +314,9 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
 
     fuel_lines = []
     for i, line in enumerate(lines):
+        stueckpreis = UNIT_PRICE.search(line) and not QTY.search(line)
         if (i in benutzt and not WASH_WORDS.search(line)) or sonstiger_posten(line) or (
-                i and sonstiger_posten(lines[i - 1]) and not FUEL_WORDS.search(line)):
+                i and sonstiger_posten(lines[i - 1]) and stueckpreis and not FUEL_WORDS.search(line)):
             continue
         fuel_lines.append(line)
 
@@ -379,7 +380,7 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
 
 def _ist_kraftstoffzeile(line: str, art: str | None) -> bool:
     """Kraftstoffzeile mit Menge, die nur nebenbei ein Postenwort enthält ("Super E10 Pflegeformel")."""
-    return art != "AdBlue" and bool(FUEL_WORDS.search(line) and QTY.search(line))
+    return art not in ("AdBlue", "Motoröl", "Wischwasser") and bool(FUEL_WORDS.search(line) and QTY.search(line))
 
 
 def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
