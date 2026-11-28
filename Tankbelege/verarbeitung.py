@@ -169,9 +169,10 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         hinweise.append(f"Tesseract nicht gefunden ({bc.TESSERACT_WINDOWS}) – Bild-Scans können nicht gelesen werden.")
 
     gesamt = bc.count_belege(belege_ordner)
-    gesehen = set(excel.vorhandene)
+    schluessel = excel.fahrzeuge.eintrag_schluessel
+    gesehen = {schluessel(k) for k in excel.vorhandene}
     # Einträge, deren Preis in Excel ergänzt wurde, sollen ohne erkannten Preis nicht erneut erscheinen.
-    nachgetragen = {k[:3] for k in excel.vorhandene if k[3] is not None}
+    nachgetragen = {schluessel(k)[:3] for k in excel.vorhandene if k[3] is not None}
     neue: list[Zeile] = []
     fortschritt(0, gesamt, "Starte ...")
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
@@ -217,16 +218,16 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         neu_angelegt = daten.fahrzeug.neu and daten.fahrzeug not in ergebnis.neue_fahrzeuge
         vorher = len(neue)
         for z in zeilen_aus_beleg(daten, seite.quelle):
-            if z.preis is None and z.key()[:3] in nachgetragen:
+            if z.preis is None and schluessel(z.key())[:3] in nachgetragen:
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Preis nicht erkannt, gleicher Eintrag mit Preis steht schon in "
                                 f"der Datei – als Duplikat übersprungen, bitte prüfen ({_zeile_text(z)})")
                 continue
-            if z.key() in gesehen:
+            if schluessel(z.key()) in gesehen:
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Duplikat übersprungen ({_zeile_text(z)})")
                 continue
-            gesehen.add(z.key())
+            gesehen.add(schluessel(z.key()))
             neue.append(z)
         if neu_angelegt and len(neue) > vorher:
             fz = daten.fahrzeug

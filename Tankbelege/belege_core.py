@@ -117,6 +117,12 @@ class FahrzeugListe:
     def _norm(value) -> str:
         return re.sub(r"\s", "", str(value)).upper()
 
+    def eintrag_schluessel(self, key: tuple) -> tuple:
+        """Duplikat-Schlüssel: Endziffern desselben Kennzeichens (z. B. 390 und 390E) gelten als ein Fahrzeug."""
+        fz = self.keys.get(self._norm(key[0]))
+        kz = self._norm(fz.kennzeichen) if fz and fz.kennzeichen else ""
+        return (kz or self._norm(key[0]),) + tuple(key[1:])
+
     def _variants(self, token: str) -> list[str]:
         token = token.replace(" ", "")
         if not token:

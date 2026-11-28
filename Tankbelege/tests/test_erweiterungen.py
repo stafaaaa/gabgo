@@ -354,3 +354,13 @@ def test_waesche_mit_bindestrich_zaehlt_einmal(fz):
 def test_feste_vorlage_enthaelt_becke_und_boediger(fz):
     assert {(f.endziffer, f.kennzeichen, f.fahrer) for f in fz.fahrzeuge} >= {
         (1800, "GE EL 1800", "Becke"), (390, "GE EL 390", "Bödiger")}
+
+
+def test_390_und_390e_sind_dasselbe_fahrzeug_fuer_duplikate(tmp_path):
+    """GE EL 390 steht als 390 und 390E in der Vorlage; derselbe Beleg zählt nur einmal."""
+    belege = tmp_path / "B"
+    text = "Diesel 40,00 l 70,00\n1,750 €/l\nSumme 70,00\n20.01.2026\nKennzeichen GE EL {}\nkm 100"
+    _pdf(belege, "a.pdf", text.format("390"))
+    _pdf(belege, "b.pdf", text.format("390E"))
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert len(erg.zeilen) == 1 and erg.duplikate == 1
