@@ -703,7 +703,8 @@ def seitenbild(seite: BelegSeite) -> Image.Image | None:
         return seite.image
     try:
         with pymupdf.open(seite.datei) as doc:
-            return _page_image(doc, doc[seite.seite - 1])
+            pix = doc[seite.seite - 1].get_pixmap(dpi=150)  # ganze Seite, nicht nur eingebettete Grafik
+            return Image.open(io.BytesIO(pix.tobytes("png")))
     except Exception:
         return None
 
