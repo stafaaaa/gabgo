@@ -1007,11 +1007,15 @@ def test_pruef_fenster_zeigt_und_zoomt_markierung(tmp_path):
         assert len(f.marken) == 1 and f.canvas.find_withtag("markierung")
         assert "Im Bild markiert: km?" in f.marken_info.cget("text")
         assert f.beschriftungen["km"].cget("text") == "Kilometerstand ?"
-        passend = f.zoom
-        f._zu_markierung("km")
-        root.update()
-        assert f.aktiv == 0 and f.zoom > passend and not f.auto_einpassen
+        assert f.aktiv == 0 and f.auto_marke and not f.auto_einpassen  # beim Öffnen auf die Stelle gezoomt
+        gezoomt = f.zoom
         f._einpassen()
-        assert f.zoom == passend
+        assert f.zoom < gezoomt and not f.auto_marke
+        f._zu_markierung("km", nur_feld=True)
+        assert f.aktiv == 0 and f.zoom == gezoomt
+        f._zoomen(1.15)
+        assert not f.auto_marke
+        f._drehen()
+        assert f.drehung == 90 and f.auto_einpassen
     finally:
         root.destroy()

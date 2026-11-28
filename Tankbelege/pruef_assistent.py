@@ -479,7 +479,7 @@ class PruefFenster:
         self.zeilen = gelbe_zeilen(self.ziel)
         self.pos = 0
         self.bild: Image.Image | None = None
-        self.zoom, self.drehung, self.auto_einpassen = 1.0, 0, True
+        self.zoom, self.drehung, self.auto_einpassen, self.auto_marke = 1.0, 0, True, False
         self._foto = None
         self.marken: list[dict] = []
         self.aktiv = -1  # Index der zuletzt angesprungenen Markierung
@@ -533,7 +533,7 @@ class PruefFenster:
         ttk.Button(knoepfe, text="Überspringen", command=self._weiter).pack(side="left", padx=4)
         ttk.Button(knoepfe, text="Schließen", command=w.destroy).pack(side="right")
 
-        self.canvas.bind("<Configure>", lambda _e: self._einpassen() if self.auto_einpassen else self._zeichnen())
+        self.canvas.bind("<Configure>", lambda _e: self._anpassen())
         self.canvas.bind("<MouseWheel>", lambda e: self._zoomen(1.15 if e.delta > 0 else 1 / 1.15))
         self.canvas.bind("<Button-4>", lambda _e: self._zoomen(1.15))
         self.canvas.bind("<Button-5>", lambda _e: self._zoomen(1 / 1.15))
@@ -568,8 +568,18 @@ class PruefFenster:
         self.marken, self.aktiv = markierungen(p, self.ziel, self.bild), -1
         self._felder_kennzeichnen(p)
         self.drehung = 0
-        self.auto_einpassen = True  # bis zum ersten Zoomen der Fenstergröße folgen (auch beim ersten Anzeigen)
-        self._einpassen()
+        # bis zum ersten eigenen Zoomen der Fenstergröße folgen (auch beim ersten Anzeigen)
+        self.auto_einpassen, self.auto_marke = True, bool(self.marken)
+        self._anpassen()
+
+    def _anpassen(self):
+        """Ansicht an die Fenstergröße anpassen: auf die markierte Stelle zoomen bzw. ganze Seite einpassen."""
+        if self.auto_marke:
+            self._zu_markierung(index=max(self.aktiv, 0))
+        elif self.auto_einpassen:
+            self._einpassen()
+        else:
+            self._zeichnen()
 
     def _felder_kennzeichnen(self, p: PruefZeile):
         """Unsichere und fehlende Felder in der Eingabe hervorheben; Zeile über dem Bild nennt die Rahmen."""
@@ -593,7 +603,7 @@ class PruefFenster:
             return self._zeichnen()
         b = self._gedreht()
         cw, ch = max(self.canvas.winfo_width(), 50), max(self.canvas.winfo_height(), 50)
-        self.auto_einpassen = True
+        self.auto_einpassen, self.auto_marke = True, False
         self.zoom = min(cw / b.width, ch / b.height)
         self.canvas.xview_moveto(0)
         self.canvas.yview_moveto(0)
@@ -626,16 +636,21 @@ class PruefFenster:
                                                   tags="markierung")
             self.canvas.tag_lower(hinter, text)
 
-    def _zu_markierung(self, feld: str | None = None, nur_feld: bool = False):
+    def _zu_markierung(self, feld: str | None = None, nur_feld: bool = False, index: int | None = None):
         """Auf die nächste (bzw. die zum Feld gehörende) markierte Stelle zoomen."""
         if self.bild is None or not self.marken:
             return
-        kandidaten = [i for i, m in enumerate(self.marken) if feld is None or m["feld"] == feld]
-        if not kandidaten:
-            if nur_feld:
-                return
-            kandidaten = list(range(len(self.marken)))
-        self.aktiv = next((i for i in kandidaten if i > self.aktiv), kandidaten[0])
+        if index is not None:
+            self.aktiv = index
+        else:
+            kandidaten = [i for i, m in enumerate(self.marken) if feld is None or m["feld"] == feld]
+            if not kandidaten:
+                if nur_feld:
+                    return
+                kandidaten = list(range(len(self.marken)))
+            if not (nur_feld and self.aktiv in kandidaten):  # Klick ins schon gezeigte Feld: Stelle behalten
+                self.aktiv = next((i for i in kandidaten if i > self.aktiv), kandidaten[0])
+            self.auto_marke = True
         b = self._gedreht()
         x0, y0, x1, y1 = box_drehen(self.marken[self.aktiv]["box"], self.drehung)
         x0, x1, y0, y1 = x0 * b.width, x1 * b.width, y0 * b.height, y1 * b.height
@@ -650,14 +665,17 @@ class PruefFenster:
 
     def _zoomen(self, faktor):
         if self.bild is not None:
-            self.auto_einpassen = False
+            self.auto_einpassen = self.auto_marke = False
             self.zoom = min(max(self.zoom * faktor, 0.05), 6.0)
             self._zeichnen()
 
     def _drehen(self):
         if self.bild is not None:
             self.drehung = (self.drehung + 90) % 360
-            self._einpassen()
+            if self.auto_marke:
+                self._zu_markierung(index=max(self.aktiv, 0))
+            else:
+                self._einpassen()
 
     # Aktionen
     def _weiter(self):
