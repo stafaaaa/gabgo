@@ -31,10 +31,11 @@ def speichern(daten: dict):
     p = pfad()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps(daten, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # nur für den eigenen Benutzer lesbar
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(daten, ensure_ascii=False, indent=2))
     tmp.replace(p)
-    if os.name != "nt":
-        os.chmod(p, 0o600)
 
 
 def _dpapi(data: bytes, schuetzen: bool) -> bytes:
