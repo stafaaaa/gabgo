@@ -747,3 +747,57 @@ def test_pruef_fenster(tmp_path):
         assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [4]
     finally:
         root.destroy()
+
+
+def test_km_zuordnung_ruecklaeufig_zwischen_neuen_belegen():
+    import verarbeitung as v
+    excel = ExcelVorlage(VORLAGE)
+    fz = excel.endziffer_bekannt(1800)
+    basis = bc.BelegDaten(fahrzeug=fz, datum=date(2026, 1, 1), kilometerstand=10000)
+    a = bc.BelegDaten(datum=date(2026, 1, 3), kilometerstand=11200)
+    b = bc.BelegDaten(datum=date(2026, 1, 5), kilometerstand=10900)
+    assert v._km_zuordnung(excel, [basis, b, a]) == {id(a)}
+    assert b.fahrzeug is None
+
+
+def test_kombibelege_mit_gleicher_waesche_bleiben_getrennt(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Tankstelle Musterstadt\nDiesel 40,00 l 71,96\nGlanzwäsche 11,49\nSumme 83,45\n20.01.2026\n")
+    _pdf(belege, "b.pdf", "Tankstelle Musterstadt\nDiesel 30,00 l 53,97\nGlanzwäsche 11,49\nSumme 65,46\n20.01.2026\n"
+                          "Kennzeichen GE EL 1800\nKilometerstand 5000")
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert sorted((str(z.endziffer), str(z.liter)) for _, z in erg.zeilen) == \
+        [("1800", "30.0"), ("1800", "Wäsche"), ("None", "40.0"), ("None", "Wäsche")]
+
+
+def test_kombibeleg_doppelt_gescannt_wird_zusammengefuehrt(tmp_path):
+    belege = tmp_path / "B"
+    text = "Tankstelle Musterstadt\nDiesel 40,00 l 71,96\nGlanzwäsche 11,49\nSumme 83,45\n20.01.2026\n"
+    _pdf(belege, "a.pdf", text)
+    _pdf(belege, "b.pdf", text + "Kennzeichen GE EL 1800\nKilometerstand 5000")
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert sorted((str(z.endziffer), str(z.liter)) for _, z in erg.zeilen) == [("1800", "40.0"), ("1800", "Wäsche")]
+
+
+def test_neues_fahrzeug_ersetzt_zeile_ohne_endziffer(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", OHNE_KZ)
+    _pdf(belege, "b.pdf", OHNE_KZ + "Kennzeichen GE EL 4711\nKilometerstand 5000")
+    ziel = tmp_path / "z.xlsx"
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert [str(z.endziffer) for _, z in erg.zeilen] == ["4711"]
+    assert [f.endziffer for f in erg.neue_fahrzeuge] == [4711]
+    assert ExcelVorlage(ziel).endziffer_bekannt(4711) is not None
+
+
+def test_ergaenzen_mit_abweichendem_km_bleibt_gelb(tmp_path):
+    belege = tmp_path / "B"
+    ziel = tmp_path / "z.xlsx"
+    _pdf(belege, "a.pdf", OHNE_KZ + "Kilometerstand 4000")
+    verarbeiten(VORLAGE, belege, ziel)
+    _pdf(tmp_path / "B2", "b.pdf", MIT_KZ)
+    erg = verarbeiten(VORLAGE, tmp_path / "B2", ziel)
+    assert [n for n, _ in erg.ergaenzt] == [3]
+    (zeile,) = _eintragungen(ziel)
+    assert zeile[0] == 1800 and zeile[6] == 4000
+    assert "Kilometerstand abweichend (Excel 4000, Beleg 5000)" in pa._hinweis_aus_zelle(zeile[7])[0]

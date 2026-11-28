@@ -6,7 +6,7 @@ import time
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import belege_core as bc
@@ -246,8 +246,21 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
                 hinweise.append(f"{seite.name}: erfasste Positionen ({_eur(daten.erfasst())}) übersteigen die Summe "
                                 f"{_eur(daten.summe)} – bitte prüfen.")
         neu_angelegt = daten.fahrzeug is not None and daten.fahrzeug.neu and daten.fahrzeug not in ergebnis.neue_fahrzeuge
-        vorher = len(neue) + len(ergaenzen)
-        for z in _mit_pruefhinweis(daten, zeilen, id(daten) in km_ergaenzt):
+        uebernommen = False
+        pz = _mit_pruefhinweis(daten, zeilen, id(daten) in km_ergaenzt)
+        ziele = {}
+        for z in pz:
+            if _unvollstaendig(z):
+                continue
+            n = next((n for n, k, _ in excel.eintrag_zeilen
+                      if n not in ergaenzen and _ohne_endziffer_gleich(k, z.key())), None)
+            i = None if n is not None else \
+                next((i for i, alt in enumerate(neue) if _ohne_endziffer_gleich(alt.key(), z.key())), None)
+            if n is not None or i is not None:
+                ziele[id(z)] = (n, i)
+        if len(ziele) < sum(not _unvollstaendig(z) for z in pz):
+            ziele = {}  # derselbe Beleg nur, wenn alle Positionen übereinstimmen (z. B. nicht nur die Wäsche)
+        for z in pz:
             if _unvollstaendig(z) and any(_teil_gleich(schluessel(z.key()), k) for k in eintraege):
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: unvollständiger Eintrag steht schon in der Datei – "
@@ -264,24 +277,29 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
                 continue
             gesehen.add(schluessel(z.key()))
             eintraege.append(schluessel(z.key()))
-            if not _unvollstaendig(z):
-                n = next((n for n, k, _ in excel.eintrag_zeilen
-                          if n not in ergaenzen and _ohne_endziffer_gleich(k, z.key())), None)
-                if n is not None:
-                    ergaenzen[n] = z
-                    ergebnis.ergaenzt.append((n, z))
-                    hinweise.append(f"{seite.name}: Excel-Zeile {n} ohne Endziffer ist derselbe Beleg – "
-                                    f"Endziffer {z.endziffer} dort ergänzt statt doppelt eingetragen.")
-                    continue
-                i = next((i for i, alt in enumerate(neue) if _ohne_endziffer_gleich(alt.key(), z.key())), None)
-                if i is not None:
-                    hinweise.append(f"{seite.name}: gleicher Beleg ohne Endziffer ({neue[i].quelle}) "
-                                    f"durch diesen vollständigeren ersetzt.")
-                    ergebnis.duplikate += 1
-                    neue[i] = z if z.kilometerstand is not None else replace(z, kilometerstand=neue[i].kilometerstand)
-                    continue
+            uebernommen = True
+            n, i = ziele.get(id(z), (None, None))
+            if n is not None:
+                km_alt = next((km for m, _, km in excel.eintrag_zeilen if m == n), None)
+                if km_alt is not None and z.kilometerstand is not None and km_alt != z.kilometerstand:
+                    grund = f"Kilometerstand abweichend (Excel {km_alt}, Beleg {z.kilometerstand})"
+                    ref = f" ({z.quelle.replace(' | ', ', ')})"
+                    z = replace(z, pruefhinweis=z.pruefhinweis.replace(ref, f", {grund}{ref}") if z.pruefhinweis
+                                else f"* Bitte prüfen/vervollständigen: {grund}{ref}")
+                    hinweise.append(f"{seite.name}: Excel-Zeile {n}: {grund}.")
+                ergaenzen[n] = z
+                ergebnis.ergaenzt.append((n, z))
+                hinweise.append(f"{seite.name}: Excel-Zeile {n} ohne Endziffer ist derselbe Beleg – "
+                                f"Endziffer {z.endziffer} dort ergänzt statt doppelt eingetragen.")
+                continue
+            if i is not None:
+                hinweise.append(f"{seite.name}: gleicher Beleg ohne Endziffer ({neue[i].quelle}) "
+                                f"durch diesen vollständigeren ersetzt.")
+                ergebnis.duplikate += 1
+                neue[i] = z if z.kilometerstand is not None else replace(z, kilometerstand=neue[i].kilometerstand)
+                continue
             neue.append(z)
-        if neu_angelegt and len(neue) + len(ergaenzen) > vorher:
+        if neu_angelegt and uebernommen:
             fz = daten.fahrzeug
             ergebnis.neue_fahrzeuge.append(fz)
             hinweise.append(f"{seite.name}: Fahrzeug {fz.endziffer} ({fz.kennzeichen or 'Kennzeichen unbekannt'}) "
@@ -383,13 +401,13 @@ def _km_zuordnung(excel: ExcelVorlage, belege: list[bc.BelegDaten]) -> set[int]:
         return datum is None or all(not (d and ((d < datum and k > km) or (d > datum and k < km)))
                                     for d, k in punkte)
     zugeordnet = set()
-    for d in belege:
-        if d.kilometerstand is None or bekannt(d.fahrzeug):
-            continue
+    offen = [d for d in belege if d.kilometerstand is not None and not bekannt(d.fahrzeug)]
+    for d in sorted(offen, key=lambda d: (d.datum is None, d.datum or date.min)):
         treffer = [k for k, punkte in verlauf.items() if passt(punkte, d.datum, d.kilometerstand)]
         if len(treffer) == 1:
             d.fahrzeug = fahrzeug[treffer[0]]
             zugeordnet.add(id(d))
+            merken(d.fahrzeug, d.datum, d.kilometerstand)  # folgende Belege müssen auch hierzu passen
     return zugeordnet
 
 
