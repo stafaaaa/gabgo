@@ -975,6 +975,8 @@ def test_ocr_lesefehler_und_ki_positionen():
     assert marken[3]["box"] == [0.45, 0.75, 0.95, 0.9]
     assert pa.markierungen_finden([("1,799", (0, 0, 9, 9)), ("17,99", (0, 50, 9, 59))], [("preis", "Preis?", "17.99")],
                                   (100, 100))[0]["box"][1] == 0.45
+    assert [m["box"][1] for m in pa.markierungen_finden([("71,86", (0, 0, 9, 9)), ("71,96", (0, 50, 9, 59))],
+                                                          [("preis", "Preis?", "71.96")], (100, 100))] == [0.45]
     d = bc._from_llm({"kennzeichen": "GE EL 1800", "kilometerstand": 5000, "datum": "20.01.2026",
                       "positionen": {"kilometerstand": [100, 800, 400, 850], "datum": [0.5, 0.2, 0.1, 0.3],
                                      "summe": [0, 0, 1, 1]}}, bc.FahrzeugListe(ExcelVorlage(VORLAGE).fahrzeuge.fahrzeuge))

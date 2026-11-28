@@ -178,20 +178,21 @@ def _aehnlich(a: str, b: str) -> bool:
     return a == b or (len(a) == len(b) >= 4 and sum(x != y for x, y in zip(a, b)) == 1)
 
 
-def _passt(feld: str, wert: str, text: str) -> bool:
+def _passt(feld: str, wert: str, text: str, streng: bool = False) -> bool:
+    gleich = str.__eq__ if streng else _aehnlich
     if feld == "endziffer":
-        return _aehnlich(re.sub(r"[^0-9A-Z]", "", text.upper()), wert) if len(wert) >= 2 else False
+        return gleich(re.sub(r"[^0-9A-Z]", "", text.upper()), wert) if len(wert) >= 2 else False
     if feld == "datum":
         d = date.fromisoformat(wert)
         ziffern = re.sub(r"\D", "", text)
         return bool(re.search(r"\d[./-]\d", text)) and any(
-            _aehnlich(ziffern, d.strftime(fmt)) for fmt in ("%d%m%Y", "%d%m%y"))
+            gleich(ziffern, d.strftime(fmt)) for fmt in ("%d%m%Y", "%d%m%y"))
     if feld == "km":
-        return any(_aehnlich(z.replace(".", ""), wert) for z in re.findall(r"\d[\d.]*\d", text))
+        return any(gleich(z.replace(".", ""), wert) for z in re.findall(r"\d[\d.]*\d", text))
     v = float(wert)
     ziele = [f"{v:.2f}"] + ([f"{v:.3f}"] if feld == "liter" else [])
     # Stellen vor und nach dem Komma müssen passen, sonst gilt z. B. der Literpreis 1,799 als Betrag 17,99
-    return any(len(i) == len(zi) and len(n) == len(zn) and _aehnlich(i + n, zi + zn)
+    return any(len(i) == len(zi) and len(n) == len(zn) and gleich(i + n, zi + zn)
                for i, n in re.findall(r"(\d+)[.,](\d{2,3})(?!\d)", text)
                for zi, zn in (z.split(".") for z in ziele))
 
@@ -202,7 +203,9 @@ def markierungen_finden(woerter, bedarf_liste, groesse, ki_positionen=()) -> lis
     breite, hoehe = groesse
     aus = []
     for feld, label, wert in dict.fromkeys(bedarf_liste):
-        boxen = [b for t, b in woerter if wert and _passt(feld, wert, t)]
+        # genaue Treffer vor solchen mit einem abweichenden Zeichen (z. B. 71,86 statt 71,96)
+        boxen = [b for t, b in woerter if wert and _passt(feld, wert, t, streng=True)] or \
+            [b for t, b in woerter if wert and _passt(feld, wert, t)]
         if not boxen:
             boxen = [(x0 * breite, y0 * hoehe, x1 * breite, y1 * hoehe)
                      for f, w, (x0, y0, x1, y1) in ki_positionen if f == feld and _wert(feld, w) == wert and wert]
