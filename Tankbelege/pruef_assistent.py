@@ -188,10 +188,12 @@ def _passt(feld: str, wert: str, text: str) -> bool:
             _aehnlich(ziffern, d.strftime(fmt)) for fmt in ("%d%m%Y", "%d%m%y"))
     if feld == "km":
         return any(_aehnlich(z.replace(".", ""), wert) for z in re.findall(r"\d[\d.]*\d", text))
-    ziel = wert.replace(".", "")
-    return any(_aehnlich(z.replace(",", "").replace(".", ""), ziel) or _aehnlich(z.replace(",", "").replace(".", ""),
-                                                                                  ziel + "0")
-               for z in re.findall(r"\d+[.,]\d{2,3}", text))
+    v = float(wert)
+    ziele = [f"{v:.2f}"] + ([f"{v:.3f}"] if feld == "liter" else [])
+    # Stellen vor und nach dem Komma müssen passen, sonst gilt z. B. der Literpreis 1,799 als Betrag 17,99
+    return any(len(i) == len(zi) and len(n) == len(zn) and _aehnlich(i + n, zi + zn)
+               for i, n in re.findall(r"(\d+)[.,](\d{2,3})(?!\d)", text)
+               for zi, zn in (z.split(".") for z in ziele))
 
 
 def markierungen_finden(woerter, bedarf_liste, groesse, ki_positionen=()) -> list[dict]:
