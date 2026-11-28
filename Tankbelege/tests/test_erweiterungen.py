@@ -801,3 +801,15 @@ def test_ergaenzen_mit_abweichendem_km_bleibt_gelb(tmp_path):
     (zeile,) = _eintragungen(ziel)
     assert zeile[0] == 1800 and zeile[6] == 4000
     assert "Kilometerstand abweichend (Excel 4000, Beleg 5000)" in pa._hinweis_aus_zelle(zeile[7])[0]
+
+
+@pytest.mark.parametrize("link", ["\\\\server\\share\\x.png", "//server/share/x.png", "C:/x.png",
+                                  "Belege_Vorschau/../x.png", "../Belege_Vorschau/x.png"])
+def test_vorschau_link_nur_im_vorschau_ordner(tmp_path, link):
+    assert pa._vorschau_pfad(tmp_path / "z.xlsx", link) is None
+    p = pa.PruefZeile(3, None, None, None, None, None, "* x (\\\\server\\a.pdf, Seite 1)", link)
+    assert pa.bild_laden(p, tmp_path / "z.xlsx", tmp_path) is None
+
+
+def test_vorschau_link_gueltig(tmp_path):
+    assert pa._vorschau_pfad(tmp_path / "z.xlsx", "Belege_Vorschau/a_S1.png") == tmp_path / "Belege_Vorschau" / "a_S1.png"

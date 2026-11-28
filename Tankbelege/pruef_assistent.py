@@ -101,13 +101,21 @@ def gelbe_zeilen(ziel: Path) -> list[PruefZeile]:
         wb.close()
 
 
+def _vorschau_pfad(ziel: Path, link: str) -> Path | None:
+    """Nur Links der Form Belege_Vorschau/<name>.png neben der Ziel-Datei (kein UNC-/absoluter Pfad)."""
+    m = re.fullmatch(rf"{VORSCHAU_ORDNER}[/\\]([\w.-]+\.png)", link or "")
+    return Path(ziel).parent / VORSCHAU_ORDNER / m.group(1) if m and ".." not in m.group(1) else None
+
+
 def bild_laden(p: PruefZeile, ziel: Path, belege_ordner: Path | None) -> Image.Image | None:
     """Gespeicherter Ausschnitt, sonst die Seite aus dem Belege-Ordner (z. B. bei älteren Prüfhinweisen)."""
-    if p.vorschau and (Path(ziel).parent / p.vorschau).is_file():
-        with Image.open(Path(ziel).parent / p.vorschau) as im:
+    bild = _vorschau_pfad(ziel, p.vorschau)
+    if bild and bild.is_file():
+        with Image.open(bild) as im:
             return im.convert("RGB")
     q = p.quelle()
-    if q and belege_ordner and (Path(belege_ordner) / q[0]).is_file():
+    # nur einfache Dateinamen im Belege-Ordner, keine Netzwerk- oder absoluten Pfade aus der Arbeitsmappe
+    if q and belege_ordner and re.fullmatch(r"[^\\/:]+", q[0]) and (Path(belege_ordner) / q[0]).is_file():
         try:
             return zuschneiden(seitenbild(Path(belege_ordner) / q[0], q[1]))
         except Exception:
