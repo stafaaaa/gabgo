@@ -20,9 +20,10 @@ QUELLE_RE = re.compile(r"\(([^()]+?), Seite (\d+)\)\s*$")
 
 
 # ------------------------------------------------------------------ Bildausschnitte
-def _hauptbereich(profil: list[int], start: int) -> tuple[int, int]:
-    """Bereich des Profils ohne kleine abgesetzte Flecken (z. B. Scanner-Kanten): Abschnitte, die durch eine
-    Lücke von mindestens 3 % getrennt sind und weniger als 2 % der dunklen Fläche enthalten, fallen weg."""
+def _hauptbereich(profil: list[int], start: int, laenge: int) -> tuple[int, int]:
+    """Bereich des Profils ohne kleine abgesetzte Flecken (Staub, Scanner-Kante): Abschnitte, die durch eine
+    Lücke von mindestens 3 % getrennt, schmaler als 0,8 % der Seite sind und weniger als 2 % der dunklen
+    Fläche enthalten, fallen weg. Abgesetzte Notizen wie ein handschriftlicher km-Stand sind breiter und bleiben."""
     luecke = max(len(profil) * 3 // 100, 5)
     teile, anfang, leer = [], None, 0
     for i, v in enumerate(profil + [0] * luecke):
@@ -36,7 +37,8 @@ def _hauptbereich(profil: list[int], start: int) -> tuple[int, int]:
                 teile.append((anfang, ende, sum(profil[anfang:ende])))
                 anfang = None
     gesamt = sum(m for *_, m in teile) or 1
-    gross = [t for t in teile if t[2] >= gesamt * 0.02] or teile
+    fleck = max(laenge * 0.008, 8)
+    gross = [t for t in teile if t[2] >= gesamt * 0.02 or t[1] - t[0] >= fleck] or teile
     return start + gross[0][0], start + gross[-1][1]
 
 
@@ -48,8 +50,8 @@ def zuschneiden(im: Image.Image, rand: int = 20) -> Image.Image:
     if not box:
         return im
     l, o, r, u = box
-    l, r = _hauptbereich(list(maske.crop(box).resize((r - l, 1), Image.BOX).tobytes()), l)
-    o, u = _hauptbereich(list(maske.crop((l, o, r, u)).resize((1, u - o), Image.BOX).tobytes()), o)
+    l, r = _hauptbereich(list(maske.crop(box).resize((r - l, 1), Image.BOX).tobytes()), l, im.width)
+    o, u = _hauptbereich(list(maske.crop((l, o, r, u)).resize((1, u - o), Image.BOX).tobytes()), o, im.height)
     return im.crop((max(l - rand, 0), max(o - rand, 0), min(r + rand, im.width), min(u + rand, im.height)))
 
 

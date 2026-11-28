@@ -902,3 +902,13 @@ def test_zuschneiden_ignoriert_kleinen_fleck_am_rand():
     d.rectangle((1380, 740, 1386, 748), fill="black")
     aus = pa.zuschneiden(im)
     assert aus.width < 450 and aus.height > 1500
+
+
+def test_zuschneiden_behaelt_abgesetzte_notiz():
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1400, 2400), "white")
+    d = ImageDraw.Draw(im)
+    for y in range(100, 1500, 40):
+        d.rectangle((100, y, 480, y + 15), fill="black")
+    d.rectangle((150, 1800, 260, 1830), fill="black")  # handschriftlicher km-Stand mit Abstand darunter
+    assert pa.zuschneiden(im).height > 1700
