@@ -183,7 +183,7 @@ class FahrzeugListe:
             if not m:
                 continue
             rest = line[m.end():]
-            rest = re.sub(r"^[\w-]*?(zeichen|nummer|nr\.?)\b", "", rest, flags=re.I)
+            rest = re.sub(r"^[\w-]*?(z?eichen|nummer|nr\.?)\b", "", rest, flags=re.I)
             tokens = re.findall(r"[A-Za-z0-9€£|$!]+", rest)
             while tokens and tokens[0].isalpha() and len(tokens[0]) <= 3 and tokens[0].upper() == tokens[0]:
                 tokens.pop(0)
