@@ -243,3 +243,57 @@ def test_fahrzeug_aus_fester_vorlage_beim_anhaengen(tmp_path):
     assert [z.endziffer for _, z in erg.zeilen] == [endziffer]
     werte = [[c.value for c in r[:3]] for r in openpyxl.load_workbook(ziel)["Liste KfZ_Fahrer"].iter_rows()]
     assert [endziffer, kz, fahrer] in werte
+
+
+def test_waesche_0_euro_nimmt_keinen_folgepreis(fz):
+    d = parse("Super 30,00 l 52,50\n1,750 €/l\nWäsche 0,00\nKaffee 3,20\nSumme 55,70", fz)
+    assert liter(d) == [(30.0, 52.5)] and d.rest() == 3.2
+
+
+def test_gleich_teure_verschiedene_posten_zaehlen_beide(fz):
+    d = parse("Innenreinigung 5,00\nStaubsauger 5,00\nSumme 10,00", fz)
+    assert sum(p for _, p in liter(d)) == 10.0 and d.rest() == 0
+
+
+def test_tankmenge_nach_zusatzartikel(fz):
+    d = parse("Wischwasser 4,99\n40,00 l 70,00\nSumme 74,99", fz)
+    assert sorted(liter(d), key=str) == sorted([(40.0, 70.0), ("Wischwasser", 4.99)], key=str)
+
+
+def test_motoroel_diesel_ist_keine_tankung(fz):
+    d = parse("Diesel 40,00 l 70,00\n1,750 €/l\nMotoröl Diesel 1,00 l 14,90\nSumme 84,90", fz)
+    assert liter(d) == [(40.0, 70.0), ("Motoröl", 14.9)]
+
+
+def test_neues_kennzeichen_anderer_ort(tmp_path):
+    _pdf(tmp_path / "B", "n.pdf", "Super E10 30,00 l 52,50\n02.03.2026\nKennzeichen B AB 1234\n"
+                                  "Kilometerstand 5000\nSumme 52,50")
+    erg = verarbeiten(VORLAGE, tmp_path / "B", tmp_path / "t.xlsx")
+    assert [(z.endziffer, z.liter) for _, z in erg.zeilen] == [(1234, 30.0)]
+
+
+def test_ki_bekommt_bild_bei_text_pdf_und_bucht_posten_einmal(tmp_path, fz, monkeypatch):
+    _pdf(tmp_path, "t.pdf", "Diesel 40,00 l\nSumme 77,99\n20.01.2026 12:57\nKennzeichen GE EL 545E\n")
+    seite = next(bc.iter_belege(tmp_path))
+    assert seite.text and seite.image is None
+    erhalten = {}
+
+    def frage(ki, text, bild, fahrzeuge, timeout=180):
+        erhalten["bild"] = bild
+        return bc.BelegDaten(kilometerstand=11836, posten=(("AdBlue", 7.99),))
+
+    monkeypatch.setattr(ki_anbieter, "frage_ki", frage)
+    d = bc.auswerten(seite, fz, "deu", ki_anbieter.KiEinstellung("openrouter", "", "k"))
+    assert erhalten["bild"] is not None
+    assert liter(d) == [(40.0, 70.0), ("AdBlue", 7.99)] and d.rest() == 0
+
+
+def test_einstellungsdatei_nur_fuer_eigenen_benutzer(tmp_path, monkeypatch):
+    import os
+    import stat
+    monkeypatch.setenv("TANKBELEGE_EINSTELLUNGEN", str(tmp_path / "e.json"))
+    einstellungen.speichern({"a": 1})
+    einstellungen.speichern({"a": 2})
+    if os.name != "nt":
+        assert stat.S_IMODE((tmp_path / "e.json").stat().st_mode) == 0o600
+    assert einstellungen.laden() == {"a": 2}
