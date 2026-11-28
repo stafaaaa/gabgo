@@ -40,7 +40,7 @@ def vorlage():
     ("Kfz: GE EL 545E", "545E"),
     ("KFZ-Kennzeichen GE LE 1026", "102E"),
     ("Kennzeichen GE EL 1O03", 1003),
-    ("Fahrzeug GE-EL 390", "390E"),
+    ("Fahrzeug GE-EL 390", 390),
 ])
 def test_endziffer_ocr_toleranz(vorlage, raw, expected):
     fz, _, _ = vorlage.fahrzeuge.find_in_text(raw)

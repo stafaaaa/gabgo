@@ -231,7 +231,7 @@ def test_fahrzeug_aus_fester_vorlage_beim_anhaengen(tmp_path):
             if info.filename == ExcelVorlage(VORLAGE).liste_part:
                 xml = data.decode()
                 ws = openpyxl.load_workbook(VORLAGE)["Liste KfZ_Fahrer"]
-                nr = max(r for r in range(2, ws.max_row + 1) if str(ws.cell(r, 2).value or "").startswith("GE "))
+                nr = next(r for r in range(2, ws.max_row + 1) if ws.cell(r, 1).value == 1800)
                 weg = ws[nr]
                 m = next(m for m in ev.ROW_RE.finditer(xml) if m.group(1) == str(nr))
                 data = (xml[:m.start()] + xml[m.end():]).encode()
@@ -349,3 +349,8 @@ def test_direkt_gelesener_preis_gewinnt_beim_mehrheitsentscheid(fz):
 def test_waesche_mit_bindestrich_zaehlt_einmal(fz):
     d = parse("Super 56,37 l 101,41\n1,799 €/l\nWash-Glanzwäsche 11,49\n0082 Glanzwäsche 11,49\nSumme 112,90", fz)
     assert liter(d) == [(56.37, 101.41), ("Wäsche", 11.49)]
+
+
+def test_feste_vorlage_enthaelt_becke_und_boediger(fz):
+    assert {(f.endziffer, f.kennzeichen, f.fahrer) for f in fz.fahrzeuge} >= {
+        (1800, "GE EL 1800", "Becke"), (390, "GE EL 390", "Bödiger")}
