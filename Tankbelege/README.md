@@ -36,3 +36,11 @@ Hinweise und Fehler stehen ausschließlich in `<Ziel>_pruefung.txt` (beim Anhän
 ## Tests
 
 `python -m pytest tests`
+
+## Windows-Installer (Inno Setup)
+
+`build_setup.bat` baut die App und daraus mit [Inno Setup 6](https://jrsoftware.org/isdl.php) `Output\Tankbelege-Setup.exe`
+(Skript: `installer.iss`). Liegt Tesseract unter `C:\Program Files\Tesseract-OCR`, wird es inklusive Sprachdaten mitgeliefert.
+Das Setup installiert nach `C:\Program Files\Tankbelege` und legt Startmenü- sowie optional eine Desktop-Verknüpfung an.
+Die installierte App nutzt `Dokumente\Tankbelege` für Belege (Unterordner `Belege`) und Ergebnisse; die Vorlage bleibt
+schreibgeschützt im Programmordner. GitHub Actions baut das Setup als Download `Tankbelege-Setup`.

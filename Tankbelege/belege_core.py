@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import urllib.error
 import urllib.request
 from collections import Counter
@@ -336,7 +337,8 @@ def _fmt(v) -> str:
 
 def configure_tesseract() -> str | None:
     import pytesseract
-    for cand in (os.environ.get("TESSERACT_CMD"), TESSERACT_WINDOWS, shutil.which("tesseract")):
+    mitgeliefert = Path(sys.executable).parent / "tesseract" / "tesseract.exe" if getattr(sys, "frozen", False) else None
+    for cand in (os.environ.get("TESSERACT_CMD"), mitgeliefert, TESSERACT_WINDOWS, shutil.which("tesseract")):
         if cand and Path(cand).exists():
             pytesseract.pytesseract.tesseract_cmd = cand
             return cand

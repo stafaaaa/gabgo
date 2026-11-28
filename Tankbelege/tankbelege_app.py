@@ -16,11 +16,41 @@ from verarbeitung import verarbeiten, _zeile_text
 
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 STANDARD_VORLAGE = APP_DIR / "Tanken_neu - Kopie.xlsx"
-STANDARD_BELEGE = APP_DIR / "Belege"
+
+
+def _dokumente() -> Path:
+    if os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+            return Path(buf.value)
+    return Path.home() / "Documents"
+
+
+def _beschreibbar(ordner: Path) -> bool:
+    try:
+        test = ordner / ".schreibtest"
+        test.write_bytes(b"")
+        test.unlink()
+        return True
+    except OSError:
+        return False
+
+
+# Per Installer (Programme-Ordner) installiert: Belege und Ergebnisse liegen unter Dokumente\Tankbelege.
+INSTALLIERT = (APP_DIR / "unins000.exe").exists() or not _beschreibbar(APP_DIR)
+DATEN_DIR = _dokumente() / "Tankbelege" if INSTALLIERT else APP_DIR
+STANDARD_BELEGE = DATEN_DIR / "Belege"
+if INSTALLIERT:
+    try:
+        STANDARD_BELEGE.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
 
 def standard_ziel(vorlage: Path) -> Path:
-    return vorlage.with_name(f"Tanken_{date.today():%Y_%m}_ausgefuellt.xlsx")
+    ordner = DATEN_DIR if Path(vorlage).resolve().parent == APP_DIR.resolve() else Path(vorlage).parent
+    return ordner / f"Tanken_{date.today():%Y_%m}_ausgefuellt.xlsx"
 
 
 class App:

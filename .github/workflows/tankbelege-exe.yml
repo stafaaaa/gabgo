@@ -31,3 +31,56 @@ jobs:
             Tankbelege/dist/Tankbelege.exe
             Tankbelege/start.bat
             Tankbelege/README.md
+
+  windows-setup:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Tankbelege
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tesseract (mit deutschem Sprachpaket) und Inno Setup bereitstellen
+        run: |
+          choco install tesseract -y --no-progress
+          $tess = "$env:ProgramFiles\Tesseract-OCR"
+          if (!(Test-Path "$tess\tesseract.exe")) { throw "Tesseract nicht installiert" }
+          if (!(Test-Path "$tess\tessdata\deu.traineddata")) {
+            Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/deu.traineddata -OutFile "$tess\tessdata\deu.traineddata"
+          }
+          if (!(Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Setup bauen
+        shell: cmd
+        run: build_setup.bat
+      - name: Setup still installieren und testen
+        run: |
+          # System-Tesseract ausblenden, damit das mitgelieferte geprüft wird
+          Rename-Item "$env:ProgramFiles\Tesseract-OCR" "Tesseract-OCR-aus"
+          $p = Start-Process Output\Tankbelege-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=desktopicon' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Setup ExitCode $($p.ExitCode)" }
+          $app = "$env:ProgramFiles\Tankbelege"
+          foreach ($f in "Tankbelege.exe","Tanken_neu - Kopie.xlsx","tesseract\tesseract.exe","tesseract\tessdata\deu.traineddata","unins000.exe") {
+            if (!(Test-Path "$app\$f")) { throw "fehlt: $f" }
+          }
+          $lnk = Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu\Programs","$env:PUBLIC\Desktop" -Filter "Tankbelege*.lnk" -Recurse
+          $lnk | ForEach-Object { $_.FullName }
+          if ($lnk.Count -lt 3) { throw "Verknüpfungen fehlen" }
+          $daten = [Environment]::GetFolderPath("MyDocuments") + "\Tankbelege"
+          foreach ($lauf in 1, 2) {
+            $p = Start-Process "$app\Tankbelege.exe" -ArgumentList '--cli','--belege',"`"$PWD\Belege`"" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "Lauf $lauf ExitCode $($p.ExitCode)" }
+          }
+          $ziel = Get-ChildItem "$daten\Tanken_*_ausgefuellt.xlsx" | Select-Object -First 1
+          if (!$ziel) { throw "keine Ausgabe in $daten" }
+          Get-Content ($ziel.FullName -replace '\.xlsx$','_pruefung.txt')
+          python -c "import openpyxl,sys; ws=openpyxl.load_workbook(sys.argv[1])['Eintragungen']; rows=[[c.value for c in r] for r in ws.iter_rows(min_row=3,max_col=7)]; print(rows); assert len(rows)==2 and rows[0][0]=='545E' and rows[0][4]==56.37 and rows[1][4]=='Wäsche', rows" $ziel.FullName
+          $p = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          Start-Sleep 3
+          if (Test-Path "$app\Tankbelege.exe") { throw "Deinstallation unvollständig" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tankbelege-Setup
+          path: Tankbelege/Output/Tankbelege-Setup.exe

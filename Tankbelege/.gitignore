@@ -5,3 +5,5 @@ dist/
 Tankbelege.exe
 *_ausgefuellt.xlsx
 *_pruefung.txt
+vendor/
+Output/
