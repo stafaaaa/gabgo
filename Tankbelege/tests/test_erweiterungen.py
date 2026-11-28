@@ -344,3 +344,8 @@ def test_direkt_gelesener_preis_gewinnt_beim_mehrheitsentscheid(fz):
     gelesen = parse("Diesel 40,00 l 70,00\nSumme 70,00", fz)
     assert abgeleitet.preis_abgeleitet and not gelesen.preis_abgeleitet
     assert not bc.combine([abgeleitet, gelesen]).preis_abgeleitet
+
+
+def test_waesche_mit_bindestrich_zaehlt_einmal(fz):
+    d = parse("Super 56,37 l 101,41\n1,799 €/l\nWash-Glanzwäsche 11,49\n0082 Glanzwäsche 11,49\nSumme 112,90", fz)
+    assert liter(d) == [(56.37, 101.41), ("Wäsche", 11.49)]

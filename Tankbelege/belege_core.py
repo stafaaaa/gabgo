@@ -415,8 +415,9 @@ def _posten(lines: list[str]) -> tuple[dict[str, float], set[int]]:
             # ("Wash Glanzwäsche € 11,49" / "0082 Glanzwäsche 11,49"), nicht bei Innenreinigung + Staubsauger
             woerter = set()
             for z in zeilen:
-                ws = [w for w in re.findall(r"[^\W_]+", lines[z].lower().replace("-", "")) if not w.isdigit()]
-                woerter |= {w for w in ws if len(w) >= 4} | {a + b for a, b in zip(ws, ws[1:])}  # "Ad Blue" = "AdBlue"
+                for text in (lines[z].lower(), lines[z].lower().replace("-", "")):  # "5W-30" = "5W30"
+                    ws = [w for w in re.findall(r"[^\W_]+", text) if not w.isdigit()]
+                    woerter |= {w for w in ws if len(w) >= 4} | {a + b for a, b in zip(ws, ws[1:])}  # "Ad Blue"
             liste = gesehen.setdefault(art, [])
             if not any(v == vals[-1] and w & woerter for v, w in liste):
                 liste.append((vals[-1], woerter))
