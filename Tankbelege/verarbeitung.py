@@ -201,6 +201,8 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
             hinweise.append(f"{seite.name}: Fehler beim Lesen – {exc}")
             ergebnis.uebersprungen += 1
             continue
+        finally:
+            seite.image = None  # Seitenbilder nicht bis zum Speichern im Arbeitsspeicher halten
         for h in daten.hinweise:
             hinweise.append(f"{seite.name}: {h}")
         if not _zeilen(daten, seite.quelle):
