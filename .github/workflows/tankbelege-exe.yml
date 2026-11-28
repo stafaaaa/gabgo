@@ -76,7 +76,7 @@ jobs:
           $ziel = Get-ChildItem "$daten\Tanken_*_ausgefuellt.xlsx" | Select-Object -First 1
           if (!$ziel) { throw "keine Ausgabe in $daten" }
           Get-Content ($ziel.FullName -replace '\.xlsx$','_pruefung.txt')
-          python -c "import openpyxl,sys; ws=openpyxl.load_workbook(sys.argv[1])['Eintragungen']; rows=[[c.value for c in r] for r in ws.iter_rows(min_row=3,max_col=7)]; print(rows); assert len(rows)==2 and rows[0][0]=='545E' and rows[0][4]==56.37 and rows[1][4]=='Wäsche', rows" $ziel.FullName
+          .venv\Scripts\python.exe -c "import openpyxl,sys; ws=openpyxl.load_workbook(sys.argv[1])['Eintragungen']; rows=[[c.value for c in r] for r in ws.iter_rows(min_row=3,max_col=7)]; print(rows); assert len(rows)==2 and rows[0][0]=='545E' and rows[0][4]==56.37 and rows[1][4]=='Wäsche', rows" $ziel.FullName
           $p = Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           Start-Sleep 3
           if (Test-Path "$app\Tankbelege.exe") { throw "Deinstallation unvollständig" }
