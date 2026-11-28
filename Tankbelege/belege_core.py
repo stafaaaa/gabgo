@@ -438,7 +438,8 @@ def combine(results: list[BelegDaten]) -> BelegDaten:
         if len(counts) > 1 and name not in ("einheit",):
             shown = ", ".join(sorted({_fmt(v) for v in values}))
             out.hinweise.append(f"OCR unsicher bei {name}: gelesen {shown} -> {_fmt(getattr(out, name))} gewählt")
-    out.preis_abgeleitet = any(r.preis_abgeleitet and r.kraftstoff_preis == out.kraftstoff_preis for r in results)
+    gleich = [r for r in results if r.kraftstoff_preis is not None and r.kraftstoff_preis == out.kraftstoff_preis]
+    out.preis_abgeleitet = bool(gleich) and all(r.preis_abgeleitet for r in gleich)
     roh = [r.kennzeichen_roh for r in results if r.kennzeichen_roh]
     out.kennzeichen_roh = roh[0] if roh else None
     for r in results:
