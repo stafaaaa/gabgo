@@ -253,6 +253,7 @@ class BelegDaten:
     posten: tuple = ()  # ((Art, Betrag), ...) z. B. ("AdBlue", 8.99) – alles außer Kraftstoff und Wäsche
     hinweise: list[str] = field(default_factory=list)
     preis_abgeleitet: bool = False
+    preis_berechnet: bool = False  # Kraftstoffpreis = Liter x Literpreis, nicht vom Beleg gelesen
 
     FELDER = ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
               "kilometerstand", "summe", "posten")
@@ -375,6 +376,7 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
         if price is None and unit_price:
             price = round(daten.menge * unit_price, 2)
             daten.hinweise.append("Kraftstoffpreis aus Liter x Literpreis berechnet")
+            daten.preis_berechnet = True
         daten.kraftstoff_preis = price
 
     for line in lines:
@@ -447,6 +449,7 @@ def combine(results: list[BelegDaten]) -> BelegDaten:
             out.hinweise.append(f"OCR unsicher bei {name}: gelesen {shown} -> {_fmt(getattr(out, name))} gewählt")
     gleich = [r for r in results if r.kraftstoff_preis is not None and r.kraftstoff_preis == out.kraftstoff_preis]
     out.preis_abgeleitet = bool(gleich) and all(r.preis_abgeleitet for r in gleich)
+    out.preis_berechnet = bool(gleich) and all(r.preis_berechnet for r in gleich)
     roh = [r.kennzeichen_roh for r in results if r.kennzeichen_roh]
     out.kennzeichen_roh = roh[0] if roh else None
     for r in results:

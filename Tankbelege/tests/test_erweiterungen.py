@@ -462,3 +462,148 @@ def test_unsichere_zusatzposition_bekommt_pruefhinweis():
     d.hinweise.append("OCR unsicher bei posten: gelesen ... gewählt")
     (z,) = v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "a.pdf | Seite 1"))
     assert z.pruefhinweis == "* Bitte prüfen/vervollständigen: Zusatzposition unsicher (a.pdf, Seite 1)"
+
+
+@pytest.mark.parametrize("menge, preis, ok", [
+    (56.37, 101.41, True),   # 1,799
+    (40.0, 64.76, True),     # 1,619
+    (30.0, 62.97, True),     # 2,099
+    (20.0, 44.78, True),     # 2,239
+    (10.0, 13.59, True),     # 1,359 – untere Grenze
+    (10.0, 25.49, True),     # 2,549 – obere Grenze
+    (10.0, 13.39, False),    # 1,339 < 1,35
+    (10.0, 25.59, False),    # 2,559 > 2,55
+    (40.0, 70.00, False),    # 1,750
+    (40.0, 71.94, False),    # 1,7985
+])
+def test_literpreis_rechnerisch_bestaetigt(menge, preis, ok):
+    import verarbeitung as v
+    assert v.literpreis_bestaetigt(bc.BelegDaten(menge=menge, kraftstoff_preis=preis)) is ok
+
+
+def test_berechneter_preis_bestaetigt_nichts():
+    import verarbeitung as v
+    assert not v.literpreis_bestaetigt(bc.BelegDaten(menge=40.0, kraftstoff_preis=71.96, preis_berechnet=True))
+
+
+def _beleg(**kw):
+    d = bc.BelegDaten(datum=date(2026, 1, 20), kilometerstand=5000, **kw)
+    d.fahrzeug = bc.Fahrzeug("1800", "GE EL 1800", "Becke")
+    return d
+
+
+def test_plausibler_literpreis_unterdrueckt_ocr_warnung():
+    import verarbeitung as v
+    for preis, erwartet in [(71.96, None), (70.00, "Liter unsicher, Preis unsicher")]:
+        d = _beleg(menge=40.0, kraftstoff_preis=preis)
+        d.hinweise += ["OCR unsicher bei menge: ...", "OCR unsicher bei kraftstoff_preis: ...",
+                       "OCR unsicher bei kilometerstand: ..."]
+        (z,) = v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "a.pdf | Seite 1"))
+        gruende = z.pruefhinweis.split(": ", 1)[1]
+        assert gruende.startswith(erwartet + ", " if erwartet else "Handschrift/km unsicher")
+
+
+def test_shop_rest_nur_im_protokoll(tmp_path):
+    _pdf(tmp_path / "B", "x.pdf", "Diesel 40,00 l 71,96\n1,799 €/l\nKaffee 3,20\nSumme 75,16" + FUSS)
+    erg = verarbeiten(VORLAGE, tmp_path / "B", tmp_path / "t.xlsx")
+    assert [(z.liter, z.preis, z.pruefhinweis or None) for _, z in erg.zeilen] == [(40.0, 71.96, None)]
+    assert any("3,20 € Shop-/Restbetrag nicht zugeordnet" in h for h in erg.hinweise)
+    assert "3,20 € Shop-/Restbetrag nicht zugeordnet" in erg.pruefung.read_text(encoding="utf-8-sig")
+
+
+def test_kombibon_summe_gleich_einzelposition_kein_fehlalarm():
+    import verarbeitung as v
+    d = _beleg(menge=40.0, kraftstoff_preis=70.0, waesche_preis=11.49, summe=70.0)
+    assert all(not z.pruefhinweis for z in v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "a.pdf | Seite 1")))
+    d = _beleg(menge=40.0, kraftstoff_preis=70.0, waesche_preis=11.49, summe=60.0)
+    assert "Positionen übersteigen die Summe" in v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "q"))[0].pruefhinweis
+
+
+def _km_excel(*eintraege):
+    excel = ExcelVorlage(VORLAGE)
+    excel.eintrag_zeilen = [(3 + i, (e, d, 40.0, 70.0), km) for i, (e, d, km) in enumerate(eintraege)]
+    return excel
+
+
+@pytest.mark.parametrize("km, datum, erwartet", [
+    (4000, date(2026, 1, 5), "1800"),    # nur im Korridor von 1800 (± 1.500 km), vor dessen 5000 km am 10.01.
+    (6400, date(2026, 1, 25), None),     # passt zu 1800 und 545E – mehrdeutig
+    (7200, date(2026, 1, 25), "545E"),
+    (20000, date(2026, 1, 25), None),    # passt zu keinem
+    (4000, date(2026, 1, 25), None),     # 1800 hatte am 10.01. schon 5000 km – zeitlich unplausibel
+    (5500, None, None),                  # ohne Datum mehrdeutig
+])
+def test_endziffer_ueber_km_verlauf(km, datum, erwartet):
+    import verarbeitung as v
+    excel = _km_excel((1800, date(2026, 1, 10), 5000), ("545E", date(2026, 1, 10), 6000))
+    d = bc.BelegDaten(datum=datum, menge=40.0, kraftstoff_preis=71.96, kilometerstand=km)
+    gefunden = v._km_zuordnung(excel, [d])
+    assert (str(d.fahrzeug.endziffer) if d.fahrzeug else None) == erwartet
+    assert gefunden == ({id(d)} if erwartet else set())
+
+
+def test_km_verlauf_aus_neuen_belegen_und_unbekanntem_fahrzeug():
+    import verarbeitung as v
+    excel = _km_excel()
+    bekannt = _beleg(menge=40.0, kraftstoff_preis=71.96)
+    neu = bc.BelegDaten(datum=date(2026, 1, 22), kilometerstand=5400, menge=30.0, kraftstoff_preis=53.97)
+    neu.fahrzeug = bc.Fahrzeug("4711", "GE EL 4711", "Neu", neu=True)
+    assert v._km_zuordnung(excel, [bekannt, neu]) == {id(neu)} and neu.fahrzeug is bekannt.fahrzeug
+
+
+def test_km_ergaenzte_endziffer_ohne_gelb(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", "Diesel 40,00 l 71,96\nSumme 71,96\n10.01.2026\nKennzeichen GE EL 1800\nKilometerstand 5000")
+    _pdf(belege, "b.pdf", "Diesel 30,00 l 53,97\nSumme 53,97\n25.01.2026\nKilometerstand 5600")
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert [(z.endziffer, z.kilometerstand, z.pruefhinweis or None) for _, z in erg.zeilen] == \
+        [(1800, 5000, None), (1800, 5600, None)]
+    assert any("über KM-Verlauf ergänzt" in h for h in erg.hinweise)
+
+
+def test_km_ergaenzt_steht_im_pruefhinweis_wenn_markiert():
+    import verarbeitung as v
+    d = _beleg(menge=40.0, kraftstoff_preis=70.0)
+    d.hinweise.append("OCR unsicher bei menge: ...")
+    (z,) = v._mit_pruefhinweis(d, v.zeilen_aus_beleg(d, "a.pdf | Seite 1"), km_ergaenzt=True)
+    assert "Liter unsicher, Endziffer über KM-Verlauf ergänzt" in z.pruefhinweis
+
+
+OHNE_KZ = "Tankstelle Musterstadt, Hauptstraße 1\nDiesel 40,00 l 71,96\nSumme 71,96\n20.01.2026\n"
+MIT_KZ = OHNE_KZ + "Kennzeichen GE EL 1800\nKilometerstand 5000"
+
+
+@pytest.mark.parametrize("erst, dann", [(OHNE_KZ, MIT_KZ), (MIT_KZ, OHNE_KZ)])
+def test_duplikat_ohne_endziffer_behaelt_vollstaendigen(tmp_path, erst, dann):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", erst)
+    _pdf(belege, "b.pdf", dann)
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert [(z.endziffer, z.kilometerstand, z.pruefhinweis or None) for _, z in erg.zeilen] == [(1800, 5000, None)]
+    assert erg.duplikate == 1
+
+
+def test_gleiche_werte_verschiedene_endziffern_bleiben(tmp_path):
+    belege = tmp_path / "B"
+    _pdf(belege, "a.pdf", MIT_KZ)
+    _pdf(belege, "b.pdf", OHNE_KZ + "Kennzeichen GE EL 545E\nKilometerstand 11836")
+    erg = verarbeiten(VORLAGE, belege, tmp_path / "z.xlsx")
+    assert sorted(str(z.endziffer) for _, z in erg.zeilen) == ["1800", "545E"]
+
+
+def test_vorhandene_zeile_ohne_endziffer_wird_ergaenzt(tmp_path):
+    belege = tmp_path / "B"
+    ziel = tmp_path / "z.xlsx"
+    _pdf(belege, "a.pdf", OHNE_KZ)
+    verarbeiten(VORLAGE, belege, ziel)
+    (zeile,) = _eintragungen(ziel)
+    assert zeile[0] is None and zeile[7].startswith("* ")
+    _pdf(belege, "b.pdf", MIT_KZ)
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert erg.zeilen == [] and [n for n, _ in erg.ergaenzt] == [3]
+    (zeile,) = _eintragungen(ziel)
+    assert (zeile[0], zeile[4], zeile[5], zeile[6], zeile[7] or None) == (1800, 40.0, 71.96, 5000, None)
+    ws = openpyxl.load_workbook(ziel)["Eintragungen"]
+    assert ws["B3"].value.startswith("=VLOOKUP") and ws.tables["Tabelle6"].ref == "A1:H3"
+    assert "In Zeilen ohne Endziffer ergänzt: 3" in erg.zusammenfassung()
+    assert verarbeiten(VORLAGE, belege, ziel).zeilen == []

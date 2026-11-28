@@ -53,6 +53,18 @@ Fehlt bei einem Beleg ein Feld oder ist es unsicher gelesen (Endziffer, Datum, L
 wird die Zeile mit allem Erkannten trotzdem eingetragen. In der letzten Spalte H von `Tabelle6` steht dann
 („Prüfhinweis“) z. B. `* Bitte prüfen/vervollständigen: Handschrift/km unsicher (Beleg.pdf, Seite 1)`, und die
 Zeile ist hellgelb markiert. Die Markierung verschwindet, sobald der Hinweis in Spalte H gelöscht wird.
+Unnötige gelbe Markierungen vermeidet die App so:
+- **Literpreis-Probe:** Ergibt `Preis / Liter` einen Literpreis von 1,35–2,55 € mit einer 9 an der dritten
+  Nachkommastelle (z. B. 1,799), gelten Liter und Preis als bestätigt; „Liter/Preis unsicher“ entfällt.
+- **KM-Verlauf:** Fehlt die Endziffer (oder ist sie unbekannt), passt der Kilometerstand aber eindeutig
+  (± 1.500 km, zeitlich plausibel) zum Verlauf genau eines Fahrzeugs aus Ziel-Datei und Import, wird dessen
+  Endziffer eingetragen. Das steht im Prüfprotokoll; gelb wird die Zeile nur, wenn noch etwas anderes unsicher ist.
+- **Shop-Rest:** Geht der Kraftstoff rechnerisch auf, steht ein übriger Betrag (Kaffee, Snacks …) als
+  „X,XX € Shop-/Restbetrag nicht zugeordnet“ nur im Prüfprotokoll. Ist die gelesene Summe nur eine Teilsumme
+  der Positionen (z. B. Kraftstoff ohne Wäsche), gibt es kein „Positionen übersteigen die Summe“.
+- **Duplikat ohne Endziffer:** Stimmen Datum, Liter und Preis exakt überein und fehlt bei einem Eintrag die
+  Endziffer, bleibt der vollständigere: In einer vorhandenen Zeile ohne Endziffer werden Endziffer und km ergänzt
+  und der Prüfhinweis entfernt, statt eine zweite Zeile anzuhängen.
 Während eines Imports liegt neben der Ziel-Datei eine Sperrdatei `<Ziel>.xlsx.lock`. Ein zweiter Import in
 dieselbe Datei bricht dann mit einem Hinweis ab, statt Einträge zu überschreiben. Eine von einem abgestürzten
 Import liegen gebliebene Sperre wird nach 10 Minuten ohne Lebenszeichen automatisch entfernt.

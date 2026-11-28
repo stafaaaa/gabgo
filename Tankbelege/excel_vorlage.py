@@ -130,7 +130,9 @@ class ExcelVorlage:
         ])
         self.vorhandene: set = set()  # vollständige Einträge (Endziffer und Datum)
         self.eintraege: list[tuple] = []  # alle Einträge, auch unvollständige
-        for r in wb[SHEET_EINTRAG].iter_rows(min_row=ERSTE_DATENZEILE, max_col=7, values_only=True):
+        self.eintrag_zeilen: list[tuple] = []  # (Excel-Zeile, Schlüssel, Kilometerstand)
+        rows = wb[SHEET_EINTRAG].iter_rows(min_row=ERSTE_DATENZEILE, max_col=7, values_only=True)
+        for n, r in enumerate(rows, ERSTE_DATENZEILE):
             if not r:
                 continue
             r = tuple(r) + (None,) * (7 - len(r))
@@ -143,6 +145,8 @@ class ExcelVorlage:
             preis = None if r[5] in (None, "") else float(r[5])
             key = Zeile(None if r[0] in (None, "") else r[0], d, liter, preis).key()
             self.eintraege.append(key)
+            km = r[6] if isinstance(r[6], (int, float)) and not isinstance(r[6], bool) else None
+            self.eintrag_zeilen.append((n, key, km))
             if r[0] not in (None, "") and d is not None:
                 self.vorhandene.add(key)
         wb.close()
@@ -152,9 +156,10 @@ class ExcelVorlage:
 
     # ---------------------------------------------------------- Schreiben
     def speichern(self, ziel: Path, zeilen: list[Zeile], anhaengen: bool = False,
-                  neue_fahrzeuge: list[Fahrzeug] = ()) -> list[int]:
+                  neue_fahrzeuge: list[Fahrzeug] = (), ergaenzen: dict | None = None) -> list[int]:
         """anhaengen=True: self.path ist eine bereits erzeugte Ausgabe und wird fortgeschrieben.
-        neue_fahrzeuge werden am Ende von "Liste KfZ_Fahrer" ergänzt."""
+        neue_fahrzeuge werden am Ende von "Liste KfZ_Fahrer" ergänzt.
+        ergaenzen: {Excel-Zeile: Zeile} – vorhandene Einträge ohne Endziffer um Endziffer, km und Prüfhinweis ergänzen."""
         ziel = Path(ziel)
         if ziel.suffix.lower() != ".xlsx":
             raise VorlagenFehler("Ziel muss eine .xlsx-Datei sein.")
@@ -165,6 +170,10 @@ class ExcelVorlage:
         liste_ende = self._liste_erweitern(parts, list(neue_fahrzeuge), strings) if neue_fahrzeuge else 0
         sheet = parts[self.sheet_part].decode("utf-8")
 
+        for n, z in sorted((ergaenzen or {}).items(), reverse=True):
+            m = next((m for m in ROW_RE.finditer(sheet) if int(m.group(1)) == n), None)
+            if m is not None:
+                sheet = sheet[:m.start()] + self._zeile_ergaenzen(m.group(0), n, z, strings) + sheet[m.end():]
         rows = {int(m.group(1)): m for m in ROW_RE.finditer(sheet)}
         if 2 not in rows:
             raise VorlagenFehler("Vorlagezeile 2 fehlt im Blatt 'Eintragungen'.")
@@ -375,6 +384,24 @@ class ExcelVorlage:
             idx = 0
         parts[self.styles_part] = styles.encode("utf-8")
         return idx
+
+    def _zeile_ergaenzen(self, row_xml: str, n: int, z: Zeile, strings) -> str:
+        zellen = {m.group(1): m for m in CELL_RE.finditer(row_xml)}
+        def stil(col):
+            return (re.search(r'\ss="\d+"', zellen[col].group(3)) or [""])[0] if col in zellen else ""
+        neu = {"A": self._value_cell(f"A{n}", z.endziffer, strings, stil("A")),
+               "H": self._value_cell(f"H{n}", z.pruefhinweis, strings, stil("H")) if z.pruefhinweis else None}
+        g = zellen.get("G")
+        if z.kilometerstand is not None and not (g and re.search(r"<v>|<is>", g.group(4) or "")):
+            neu["G"] = self._value_cell(f"G{n}", z.kilometerstand, strings, stil("G"))
+        alle = {c: m.group(0) for c, m in zellen.items()}
+        for c, x in neu.items():
+            if x is None:
+                alle.pop(c, None)
+            else:
+                alle[c] = x
+        kopf = _spans_bis_h(re.match(r"<row [^>]*?(?=/?>)", row_xml).group(0)) + ">"
+        return kopf + "".join(alle[c] for c in sorted(alle, key=_col_nr)) + "</row>"
 
     def _value_cell(self, ref: str, value, strings, style: str = "") -> str:
         if isinstance(value, str):
