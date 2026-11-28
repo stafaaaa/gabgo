@@ -20,6 +20,26 @@ QUELLE_RE = re.compile(r"\(([^()]+?), Seite (\d+)\)\s*$")
 
 
 # ------------------------------------------------------------------ Bildausschnitte
+def _hauptbereich(profil: list[int], start: int) -> tuple[int, int]:
+    """Bereich des Profils ohne kleine abgesetzte Flecken (z. B. Scanner-Kanten): Abschnitte, die durch eine
+    Lücke von mindestens 3 % getrennt sind und weniger als 2 % der dunklen Fläche enthalten, fallen weg."""
+    luecke = max(len(profil) * 3 // 100, 5)
+    teile, anfang, leer = [], None, 0
+    for i, v in enumerate(profil + [0] * luecke):
+        if v:
+            if anfang is None:
+                anfang = i
+            leer, ende = 0, i + 1
+        elif anfang is not None:
+            leer += 1
+            if leer >= luecke:
+                teile.append((anfang, ende, sum(profil[anfang:ende])))
+                anfang = None
+    gesamt = sum(m for *_, m in teile) or 1
+    gross = [t for t in teile if t[2] >= gesamt * 0.02] or teile
+    return start + gross[0][0], start + gross[-1][1]
+
+
 def zuschneiden(im: Image.Image, rand: int = 20) -> Image.Image:
     """Weiße Ränder entfernen, damit nur der Bon zu sehen ist (einzelne Staubpunkte zählen nicht)."""
     grau = ImageOps.grayscale(im)
@@ -28,6 +48,8 @@ def zuschneiden(im: Image.Image, rand: int = 20) -> Image.Image:
     if not box:
         return im
     l, o, r, u = box
+    l, r = _hauptbereich(list(maske.crop(box).resize((r - l, 1), Image.BOX).tobytes()), l)
+    o, u = _hauptbereich(list(maske.crop((l, o, r, u)).resize((1, u - o), Image.BOX).tobytes()), o)
     return im.crop((max(l - rand, 0), max(o - rand, 0), min(r + rand, im.width), min(u + rand, im.height)))
 
 
@@ -273,7 +295,7 @@ class PruefFenster:
         self.zeilen = gelbe_zeilen(self.ziel)
         self.pos = 0
         self.bild: Image.Image | None = None
-        self.zoom, self.drehung = 1.0, 0
+        self.zoom, self.drehung, self.auto_einpassen = 1.0, 0, True
         self._foto = None
 
         w = self.win = tk.Toplevel(master)
@@ -319,7 +341,7 @@ class PruefFenster:
         ttk.Button(knoepfe, text="Überspringen", command=self._weiter).pack(side="left", padx=4)
         ttk.Button(knoepfe, text="Schließen", command=w.destroy).pack(side="right")
 
-        self.canvas.bind("<Configure>", lambda _e: self._zeichnen())
+        self.canvas.bind("<Configure>", lambda _e: self._einpassen() if self.auto_einpassen else self._zeichnen())
         self.canvas.bind("<MouseWheel>", lambda e: self._zoomen(1.15 if e.delta > 0 else 1 / 1.15))
         self.canvas.bind("<Button-4>", lambda _e: self._zoomen(1.15))
         self.canvas.bind("<Button-5>", lambda _e: self._zoomen(1 / 1.15))
@@ -350,6 +372,7 @@ class PruefFenster:
         self.felder["km"].set("" if p.kilometerstand is None else str(int(p.kilometerstand)))
         self.bild = bild_laden(p, self.ziel, self.belege_ordner)
         self.drehung = 0
+        self.auto_einpassen = True  # bis zum ersten Zoomen der Fenstergröße folgen (auch beim ersten Anzeigen)
         self._einpassen()
 
     def _einpassen(self):
@@ -379,6 +402,7 @@ class PruefFenster:
 
     def _zoomen(self, faktor):
         if self.bild is not None:
+            self.auto_einpassen = False
             self.zoom = min(max(self.zoom * faktor, 0.05), 6.0)
             self._zeichnen()
 

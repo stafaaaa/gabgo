@@ -891,3 +891,14 @@ def test_km_vermutete_zuordnung_erweitert_korridor_nicht():
     b.fahrzeug = bc.Fahrzeug("4711", "GE EL 4711", "Neu", neu=True)
     assert v._km_zuordnung(excel, [basis, a, b]) == {id(a)}
     assert b.fahrzeug.endziffer == "4711"
+
+
+def test_zuschneiden_ignoriert_kleinen_fleck_am_rand():
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1400, 1800), "white")
+    d = ImageDraw.Draw(im)
+    for y in range(100, 1700, 40):
+        d.rectangle((100, y, 480, y + 15), fill="black")
+    d.rectangle((1380, 740, 1386, 748), fill="black")
+    aus = pa.zuschneiden(im)
+    assert aus.width < 450 and aus.height > 1500
