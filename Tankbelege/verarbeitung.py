@@ -20,6 +20,30 @@ class Ergebnis:
     duplikate: int = 0
     uebersprungen: int = 0
     angehaengt: bool = False
+    seiten_je_datei: dict[Path, int] = field(default_factory=dict)
+
+    def zaehlung(self, pdf: bool) -> tuple[int, int]:
+        """(Dateien, Seiten) für PDFs bzw. Bilddateien."""
+        d = [n for f, n in self.seiten_je_datei.items() if (f.suffix.lower() == ".pdf") == pdf]
+        return len(d), sum(d)
+
+    def zusammenfassung(self) -> list[str]:
+        pdf, pdf_s = self.zaehlung(True)
+        bild, bild_s = self.zaehlung(False)
+        nummern = [n for n, _ in self.zeilen]
+        bereich = f" (Excel-Zeilen {nummern[0]}–{nummern[-1]})" if len(nummern) > 1 else \
+            (f" (Excel-Zeile {nummern[0]})" if nummern else "")
+        def seiten(n):
+            return f"{n} Seite" if n == 1 else f"{n} Seiten"
+        zeilen = [f"PDF-Dateien verarbeitet:   {pdf} ({seiten(pdf_s)})"]
+        if bild:
+            zeilen.append(f"Bilddateien verarbeitet:   {bild} ({seiten(bild_s)})")
+        return zeilen + [
+            f"Seiten insgesamt:          {pdf_s + bild_s}",
+            f"Neu in Ziel-Excel:         {len(nummern)} Zeilen{bereich}",
+            f"Duplikate übersprungen:    {self.duplikate}",
+            f"Nicht übernommen:          {self.uebersprungen}",
+        ]
 
 
 def pruefung_pfad(ziel: Path) -> Path:
@@ -73,6 +97,7 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
         fortschritt(nr - 1, gesamt, f"Lese {seite.name}")
         ergebnis.belege += 1
+        ergebnis.seiten_je_datei[seite.datei] = ergebnis.seiten_je_datei.get(seite.datei, 0) + 1
         if seite.fehler:
             hinweise.append(f"{seite.name}: Datei nicht lesbar – {seite.fehler}")
             ergebnis.uebersprungen += 1
@@ -153,8 +178,9 @@ def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ollama: bool):
         f"Belege:       {ordner}",
         f"Ergebnis:     {e.ziel}" + ("  (an bestehende Datei angehängt)" if e.angehaengt else ""),
         f"Ollama:       {'an' if ollama else 'aus'}",
-        f"Belege gelesen: {e.belege}, neue Zeilen: {len(e.zeilen)}, Duplikate: {e.duplikate}, "
-        f"nicht übernommen: {e.uebersprungen}",
+        "",
+        "Zusammenfassung:",
+        *[f"  {z}" for z in e.zusammenfassung()],
         "",
         "Neue Zeilen (Excel-Zeile | Endziffer | Datum | Liter | Preis | Kilometerstand | Beleg):",
     ]

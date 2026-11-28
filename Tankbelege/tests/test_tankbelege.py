@@ -111,7 +111,10 @@ def test_textlayer_pdf_und_duplikate(tmp_path):
     assert [(n, z.liter, z.preis, z.kilometerstand) for n, z in erg.zeilen] == \
         [(3, 56.37, 101.41, 11836), (4, "Wäsche", 11.49, None)]
     assert erg.duplikate == 2
-    assert (tmp_path / "Tanken_test_pruefung.txt").exists()
+    protokoll = (tmp_path / "Tanken_test_pruefung.txt").read_text(encoding="utf-8-sig")
+    assert "PDF-Dateien verarbeitet:   2 (2 Seiten)" in protokoll
+    assert "Seiten insgesamt:          2" in protokoll
+    assert "Neu in Ziel-Excel:         2 Zeilen (Excel-Zeilen 3–4)" in protokoll
 
     erg2 = verarbeiten(ziel, belege, tmp_path / "zweiter_lauf.xlsx")
     assert erg2.zeilen == [] and erg2.duplikate == 4

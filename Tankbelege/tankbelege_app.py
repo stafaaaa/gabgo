@@ -160,8 +160,7 @@ class App:
                 elif ev[0] == "done":
                     erg = ev[1]
                     self.letztes_ziel = erg.ziel
-                    self._schreibe(f"Neue Zeilen: {len(erg.zeilen)}  (Duplikate: {erg.duplikate}, "
-                                   f"nicht übernommen: {erg.uebersprungen})")
+                    self._schreibe("\n".join(erg.zusammenfassung()))
                     for n, z in erg.zeilen:
                         self._schreibe(f"  Zeile {n}: {_zeile_text(z)}")
                     modus = "Angehängt an" if erg.angehaengt else "Gespeichert"
@@ -202,6 +201,7 @@ def cli(argv) -> int:
                       fortschritt=lambda x, g, t: print(f"[{x}/{g}] {t}"), log=print)
     for n, z in erg.zeilen:
         print(f"Zeile {n}: {_zeile_text(z)}")
+    print("\n".join(erg.zusammenfassung()))
     print(f"{'Angehängt an' if erg.angehaengt else 'Gespeichert'}: {erg.ziel}\nPrüfprotokoll: {erg.pruefung}")
     return 0
 
