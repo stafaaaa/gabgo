@@ -115,6 +115,7 @@ def test_textlayer_pdf_und_duplikate(tmp_path):
     assert "PDF-Dateien verarbeitet:   2 (2 Seiten)" in protokoll
     assert "Seiten insgesamt:          2" in protokoll
     assert "Neu in Ziel-Excel:         2 Zeilen (Excel-Zeilen 3–4)" in protokoll
+    assert "| a.pdf | Seite 1" in protokoll
 
     erg2 = verarbeiten(ziel, belege, tmp_path / "zweiter_lauf.xlsx")
     assert erg2.zeilen == [] and erg2.duplikate == 4

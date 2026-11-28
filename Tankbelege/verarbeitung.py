@@ -128,7 +128,7 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
         if (daten.summe is not None and daten.kraftstoff_preis is not None
                 and abs(daten.summe - daten.kraftstoff_preis - (daten.waesche_preis or 0)) > 0.02):
             hinweise.append(f"{seite.name}: Summe {daten.summe:.2f} passt nicht zu Kraftstoff + Wäsche – bitte prüfen.")
-        for z in zeilen_aus_beleg(daten, seite.name):
+        for z in zeilen_aus_beleg(daten, seite.quelle):
             if z.preis is None and z.key()[:3] in nachgetragen:
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Preis nicht erkannt, gleicher Eintrag mit Preis steht schon in "
@@ -182,7 +182,7 @@ def _schreibe_pruefung(e: Ergebnis, vorlage: Path, ordner: Path, ollama: bool):
         "Zusammenfassung:",
         *[f"  {z}" for z in e.zusammenfassung()],
         "",
-        "Neue Zeilen (Excel-Zeile | Endziffer | Datum | Liter | Preis | Kilometerstand | Beleg):",
+        "Neue Zeilen (Excel-Zeile | Endziffer | Datum | Liter | Preis | Kilometerstand | Quelle):",
     ]
     lines += [f"  {n:>4} | {_zeile_text(z)} | {z.quelle}" for n, z in e.zeilen] or ["  (keine)"]
     lines += ["", "Hinweise und Fehler:"]

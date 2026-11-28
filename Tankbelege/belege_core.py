@@ -430,6 +430,10 @@ class BelegSeite:
     def name(self) -> str:
         return f"{self.datei.name} (Seite {self.seite})"
 
+    @property
+    def quelle(self) -> str:
+        return f"{self.datei.name} | Seite {self.seite}"
+
 
 def iter_belege(ordner: Path):
     files = sorted(p for p in Path(ordner).iterdir()
