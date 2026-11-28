@@ -341,3 +341,15 @@ def test_paralleler_import_wird_abgewiesen(tmp_path):
     os.utime(sperre, (alt, alt))
     erg = verarbeiten(VORLAGE, belege, ziel)
     assert len(erg.zeilen) == 2 and not sperre.exists()
+
+
+def test_neuer_zielordner_wird_angelegt(tmp_path):
+    import pymupdf
+    belege = tmp_path / "Belege"
+    belege.mkdir()
+    doc = pymupdf.open()
+    doc.new_page().insert_text((40, 60), BELEG_TEXT, fontsize=9)
+    doc.save(belege / "a.pdf")
+    ziel = tmp_path / "neu" / "unter" / "Tanken_test.xlsx"
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert ziel.exists() and len(erg.zeilen) == 2

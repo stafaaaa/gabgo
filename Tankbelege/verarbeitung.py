@@ -64,6 +64,7 @@ def sperr_pfad(ziel: Path) -> Path:
 def _ziel_sperre(ziel: Path, log):
     """Verhindert, dass zwei Importe gleichzeitig in dieselbe Ziel-Datei schreiben."""
     sperre = sperr_pfad(ziel)
+    ziel.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(2):
         try:
             fd = os.open(sperre, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
