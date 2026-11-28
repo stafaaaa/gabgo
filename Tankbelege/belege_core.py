@@ -246,6 +246,7 @@ class BelegDaten:
     summe: float | None = None
     posten: tuple = ()  # ((Art, Betrag), ...) z. B. ("AdBlue", 8.99) – alles außer Kraftstoff und Wäsche
     hinweise: list[str] = field(default_factory=list)
+    preis_abgeleitet: bool = False
 
     FELDER = ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
               "kilometerstand", "summe", "posten")
@@ -361,6 +362,7 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
         if price is None and daten.summe is not None:
             price = round(daten.summe - (daten.waesche_preis or 0) - sum(p for _, p in daten.posten), 2)
             daten.hinweise.append("Kraftstoffpreis aus Summe abgeleitet")
+            daten.preis_abgeleitet = True
         if price is None and unit_price:
             price = round(daten.menge * unit_price, 2)
             daten.hinweise.append("Kraftstoffpreis aus Liter x Literpreis berechnet")
@@ -433,6 +435,7 @@ def combine(results: list[BelegDaten]) -> BelegDaten:
         if len(counts) > 1 and name not in ("einheit",):
             shown = ", ".join(sorted({_fmt(v) for v in values}))
             out.hinweise.append(f"OCR unsicher bei {name}: gelesen {shown} -> {_fmt(getattr(out, name))} gewählt")
+    out.preis_abgeleitet = any(r.preis_abgeleitet and r.kraftstoff_preis == out.kraftstoff_preis for r in results)
     roh = [r.kennzeichen_roh for r in results if r.kennzeichen_roh]
     out.kennzeichen_roh = roh[0] if roh else None
     for r in results:
@@ -750,7 +753,7 @@ def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
             ergaenzt.append("posten " + _fmt(dazu))
             rest = daten.rest()
             if (rest is not None and rest < -0.02 and daten.kraftstoff_preis is not None
-                    and "Kraftstoffpreis aus Summe abgeleitet" in daten.hinweise):
+                    and daten.preis_abgeleitet):
                 # Kraftstoffpreis war aus der Summe abgeleitet und enthielt die neuen Posten schon
                 neu = llm.kraftstoff_preis or round(daten.kraftstoff_preis + rest, 2)
                 if neu > 0:
