@@ -617,15 +617,17 @@ def test_bildausschnitt_und_link_in_spalte_h(tmp_path):
     _pdf(belege, "Scan März.pdf", OHNE_KZ)
     ziel = tmp_path / "Ziel" / "z.xlsx"
     verarbeiten(VORLAGE, belege, ziel)
-    bild = ziel.parent / "Belege_Vorschau" / "Scan_März_S1.png"
+    name = pa.vorschau_name(belege / "Scan März.pdf", 1)
+    assert name.startswith("Scan_März_") and name.endswith("_S1.png")
+    bild = ziel.parent / "Belege_Vorschau" / name
     with Image.open(bild) as im:
         assert im.width < 900 and im.height < 600  # A4 bei 200 dpi wäre 1654 x 2339, zugeschnitten auf den Text
     ws = openpyxl.load_workbook(ziel)["Eintragungen"]
-    assert ws["H3"].value.startswith('=HYPERLINK("Belege_Vorschau/Scan_März_S1.png","* Bitte prüfen')
+    assert ws["H3"].value.startswith(f'=HYPERLINK("Belege_Vorschau/{name}","* Bitte prüfen')
     regeln = [r for cf in ws.conditional_formatting for r in cf.rules]
     assert [r.formula for r in regeln] == [['LEFT($H3,1)="*"']]
     (p,) = pa.gelbe_zeilen(ziel)
-    assert p.zeile == 3 and p.vorschau == "Belege_Vorschau/Scan_März_S1.png" and p.quelle() == ("Scan März.pdf", 1)
+    assert p.zeile == 3 and p.vorschau == f"Belege_Vorschau/{name}" and p.quelle() == ("Scan März.pdf", 1)
     assert pa.bild_laden(p, ziel, None).size == Image.open(bild).size
     bild.unlink()  # ohne gespeichertes Bild: Seite aus dem Belege-Ordner
     assert pa.bild_laden(p, ziel, belege) is not None
@@ -813,3 +815,9 @@ def test_vorschau_link_nur_im_vorschau_ordner(tmp_path, link):
 
 def test_vorschau_link_gueltig(tmp_path):
     assert pa._vorschau_pfad(tmp_path / "z.xlsx", "Belege_Vorschau/a_S1.png") == tmp_path / "Belege_Vorschau" / "a_S1.png"
+
+
+def test_vorschau_namen_eindeutig():
+    namen = {pa.vorschau_name(Path(n), 1) for n in ["Scan 01.pdf", "Scan_01.pdf", "Scan_01.jpg", "Scan_01.png"]}
+    assert len(namen) == 4 and "Scan_01_S1.png" in namen
+    assert pa.vorschau_name(Path("2026-03_12-38.pdf"), 14) == "2026-03_12-38_S14.png"

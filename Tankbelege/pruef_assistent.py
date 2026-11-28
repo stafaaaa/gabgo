@@ -1,6 +1,7 @@
 """Prüf-Assistent: Bildausschnitte der Belege und kompaktes Fenster zum Abarbeiten der gelben Zeilen."""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ def seitenbild(datei: Path, seite: int, dpi: int = VORSCHAU_DPI) -> Image.Image:
 
 def vorschau_name(datei: Path, seite: int) -> str:
     stamm = re.sub(r"[^\w.-]+", "_", datei.stem).strip("_") or "Beleg"
+    if stamm != datei.stem or datei.suffix.lower() != ".pdf":  # „Scan 01.pdf“ und „Scan_01.jpg“ nicht vermischen
+        stamm += "_" + hashlib.sha1(datei.name.encode("utf-8")).hexdigest()[:6]
     return f"{stamm}_S{seite}.png"
 
 
