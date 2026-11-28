@@ -316,7 +316,10 @@ def parse_text(text: str, fahrzeuge: FahrzeugListe) -> BelegDaten:
     fuel_lines = []
     for i, line in enumerate(lines):
         # Zeile nach Zusatzartikel: Stückpreis oder Gebindegröße ohne Betrag gehört zum Artikel
-        zum_posten = (UNIT_PRICE.search(line) and not QTY.search(line)) or not betraege(line)
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        menge_vor_kraftstoff = FUEL_WORDS.search(nxt) and not QTY.search(nxt)
+        zum_posten = (UNIT_PRICE.search(line) and not QTY.search(line)) or (
+            not betraege(line) and not menge_vor_kraftstoff)
         if (i in benutzt and not WASH_WORDS.search(line)) or sonstiger_posten(line) or (
                 i and sonstiger_posten(lines[i - 1]) and zum_posten and not FUEL_WORDS.search(line)):
             continue
