@@ -185,6 +185,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     ergaenzen: dict[int, Zeile] = {}
     gelesen: list[tuple] = []
     quellen: dict[str, tuple] = {}
+    ki_positionen: dict[str, tuple] = {}
     fortschritt(0, gesamt, "Starte ...")
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
         fortschritt(nr - 1, gesamt, f"Lese {seite.name}")
@@ -219,6 +220,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
             continue
         gelesen.append((seite, daten))
         quellen[seite.quelle] = (seite.datei, seite.seite)
+        ki_positionen[seite.quelle] = daten.positionen
         log(f"{seite.name}: {_kurz(daten)}")
 
     km_ergaenzt = _km_zuordnung(excel, [d for _, d in gelesen])
@@ -315,13 +317,19 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
                             f"stand nicht in '{SHEET_LISTE}' – neu angelegt, Fahrer: {fz.fahrer or 'leer'}.")
     fortschritt(gesamt, gesamt, "Schreibe Excel ...")
     vorschau: dict[str, str] = {}
+    bedarf: dict[str, list] = {}  # unsichere Felder je Seite, für die Rahmen im Bildausschnitt
+    for z in neue + list(ergaenzen.values()):
+        if z.pruefhinweis:
+            bedarf.setdefault(z.quelle, []).extend(pruef_assistent.bedarf(
+                z.endziffer, z.datum, z.liter, z.preis, z.kilometerstand, z.pruefhinweis))
 
     def mit_vorschau(z: Zeile) -> Zeile:
         if not z.pruefhinweis or z.quelle not in quellen:
             return z
         if z.quelle not in vorschau:
             try:
-                vorschau[z.quelle] = pruef_assistent.vorschau_speichern(ziel, *quellen[z.quelle])
+                vorschau[z.quelle] = pruef_assistent.vorschau_speichern(
+                    ziel, *quellen[z.quelle], bedarf.get(z.quelle, ()), ki_positionen.get(z.quelle, ()))
             except Exception as exc:
                 vorschau[z.quelle] = ""
                 hinweise.append(f"Bildausschnitt für {z.quelle} nicht erstellt: {exc}")

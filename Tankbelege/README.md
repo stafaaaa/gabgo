@@ -70,7 +70,11 @@ Unnötige gelbe Markierungen vermeidet die App so:
 Link darauf (`=HYPERLINK("Belege_Vorschau/<Datei>_S<Seite>.png"; "* Bitte prüfen …")`); ein Klick öffnet nur das
 kleine Bild. Der Knopf **„Gelbe Belege prüfen“** öffnet ein schmales Fenster (immer im Vordergrund, rechts am
 Bildschirmrand) mit dem Beleg (Mausrad: Zoom, Ziehen: verschieben, „Drehen“) und den Feldern Endziffer, Datum,
-Liter, Preis und Kilometerstand. **„Speichern & Nächster“** schreibt die Werte in die Zeile, löscht den
+Liter, Preis und Kilometerstand. Unsichere Felder sind im Beleg farbig umrahmt und beschriftet (z. B. „Preis?“);
+die Position stammt aus den OCR-Wortkoordinaten bzw. aus den Koordinaten, die eine Vision-KI mitliefert, und
+liegt als `.json` neben dem Bild. Beim Öffnen und beim Klick in ein unsicheres Feld zoomt das Fenster auf diese
+Stelle; dazu gibt es „+“, „−“ und „Markierte Stelle“. Fehlt ein Feld ganz, steht nur oben ein Hinweis ohne Rahmen.
+**„Speichern & Nächster“** schreibt die Werte in die Zeile, löscht den
 Prüfhinweis (damit verschwindet die gelbe Markierung) und lädt den nächsten gelben Beleg. Ist die Ziel-Datei
 dabei in Excel geöffnet, ändert die App die Zeile direkt im offenen Excel und speichert dort (Windows); sonst
 schreibt sie in die Datei.

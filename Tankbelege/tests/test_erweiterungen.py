@@ -945,3 +945,73 @@ def test_korrektur_mit_ergaenzter_endziffer_wird_auch_nach_km_zuordnung_erkannt(
     erg = verarbeiten(VORLAGE, tmp_path / "B2", ziel)
     assert [str(z.liter) for _, z in erg.zeilen] == ["30.0"]
     assert len(_eintragungen(ziel)) == 2
+
+
+def test_bedarf_aus_pruefhinweis():
+    h = "* Bitte prüfen/vervollständigen: Datum fehlt, Liter unsicher, Preis unsicher, Handschrift/km unsicher (a.pdf, Seite 2)"
+    assert pa.bedarf("545E", None, 56.37, 101.41, 11836, h) == [
+        ("liter", "Liter?", "56.37"), ("preis", "Preis?", "101.41"), ("km", "km?", "11836")]
+    assert pa.fehlende_felder(h) == {"datum"}
+
+
+def test_markierungen_aus_textschicht_und_beschriftung(tmp_path):
+    _pdf(tmp_path, "a.pdf", "Diesel 40,00 l 71,96\nSumme 71,96\n20.01.2026\nKilometerstand")
+    ziel = tmp_path / "z.xlsx"
+    link = pa.vorschau_speichern(ziel, tmp_path / "a.pdf", 1, [("preis", "Preis?", "71.96"), ("datum", "Datum?", "2026-01-20"),
+                                                               ("km", "km?", None)])
+    marken = json.loads((tmp_path / link).with_suffix(".json").read_text("utf-8"))
+    assert [m["feld"] for m in marken] == ["preis", "preis", "datum", "km"]
+    preis, summe, datum, km = (m["box"] for m in marken)
+    assert preis[1] < summe[1] < datum[1] < km[1] and preis[0] > 0.3  # „71,96“ steht rechts in der Zeile
+    assert km[2] == 1.0  # ohne Wert: Zeile der Beschriftung bis zum rechten Rand
+
+
+def test_ocr_lesefehler_und_ki_positionen():
+    woerter = [("20/01/2020", (10, 10, 60, 20)), ("5456", (10, 30, 40, 40)), ("56,370", (10, 50, 40, 60))]
+    marken = pa.markierungen_finden(woerter, [("datum", "Datum?", "2026-01-20"), ("endziffer", "Endziffer?", "545E"),
+                                              ("liter", "Liter?", "56.37"), ("km", "km?", "11836")], (100, 100),
+                                    [("km", 11836, (0.5, 0.8, 0.9, 0.85))])
+    assert [m["feld"] for m in marken] == ["datum", "endziffer", "liter", "km"]
+    assert marken[3]["box"] == [0.45, 0.75, 0.95, 0.9]
+    d = bc._from_llm({"kennzeichen": "GE EL 1800", "kilometerstand": 5000, "datum": "20.01.2026",
+                      "positionen": {"kilometerstand": [100, 800, 400, 850], "datum": [0.5, 0.2, 0.1, 0.3],
+                                     "summe": [0, 0, 1, 1]}}, bc.FahrzeugListe(ExcelVorlage(VORLAGE).fahrzeuge.fahrzeuge))
+    assert d.positionen == (("km", 5000, (0.1, 0.8, 0.4, 0.85)),)
+    assert "positionen" in bc.ki_prompt(None, bc.FahrzeugListe([]), True)
+    assert "positionen" not in bc.ki_prompt("x", bc.FahrzeugListe([]), False)
+
+
+def test_box_drehen():
+    box = (0.1, 0.2, 0.3, 0.5)
+    assert pa.box_drehen(box, 90) == (0.5, 0.1, 0.8, 0.3)
+    assert pa.box_drehen(box, 360) == box
+
+
+def test_pruef_fenster_zeigt_und_zoomt_markierung(tmp_path):
+    tk = pytest.importorskip("tkinter")
+    belege, ziel = _gelbe_datei(tmp_path)
+    p = pa.gelbe_zeilen(ziel)[0]
+    (feld, label, wert), *_ = pa.bedarf(p.endziffer, p.datum, p.liter, p.preis, p.kilometerstand, p.hinweis) or [
+        (None, None, None)]
+    assert feld == "km"
+    pfad = pa._vorschau_pfad(ziel, p.vorschau).with_suffix(".json")
+    pfad.write_text(json.dumps([{"feld": "km", "label": "km?", "wert": wert, "box": [0.6, 0.7, 0.9, 0.75]}]), "utf-8")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("kein Display")
+    root.withdraw()
+    try:
+        f = pa.PruefFenster(root, ziel, belege)
+        root.update()
+        assert len(f.marken) == 1 and f.canvas.find_withtag("markierung")
+        assert "Im Bild markiert: km?" in f.marken_info.cget("text")
+        assert f.beschriftungen["km"].cget("text") == "Kilometerstand ?"
+        passend = f.zoom
+        f._zu_markierung("km")
+        root.update()
+        assert f.aktiv == 0 and f.zoom > passend and not f.auto_einpassen
+        f._einpassen()
+        assert f.zoom == passend
+    finally:
+        root.destroy()

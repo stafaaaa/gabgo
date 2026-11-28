@@ -254,6 +254,7 @@ class BelegDaten:
     hinweise: list[str] = field(default_factory=list)
     preis_abgeleitet: bool = False
     preis_berechnet: bool = False  # Kraftstoffpreis = Liter x Literpreis, nicht vom Beleg gelesen
+    positionen: tuple = ()  # ((Feld, Wert, (x0, y0, x1, y1) 0–1 im Seitenbild), ...) aus der Vision-KI
 
     FELDER = ("fahrzeug", "datum", "menge", "einheit", "kraftstoff_preis", "waesche_preis",
               "kilometerstand", "summe", "posten")
@@ -657,6 +658,10 @@ def ki_prompt(text: str | None, fahrzeuge: FahrzeugListe, mit_bild: bool) -> str
         "Unbekannte Werte als null, keine 0-Beträge erfinden. "
         f"Bekannte Kennzeichen-Endziffern: {endziffern}."
     )
+    if mit_bild:
+        prompt += (' Zusätzlich "positionen": Objekt mit der Fundstelle jedes gelesenen Werts im Bild, Schlüssel '
+                   'wie oben (kennzeichen, datum, menge, kraftstoff_preis, waesche_preis, kilometerstand), Wert '
+                   '[x0, y0, x1, y1] als Anteil 0 bis 1 von Bildbreite und -höhe; unbekannte weglassen.')
     if text:
         prompt += f"\n\nOCR-Text (kann Fehler enthalten):\n{text}"
     return prompt
@@ -709,7 +714,31 @@ def _from_llm(data: dict, fahrzeuge: FahrzeugListe) -> BelegDaten:
     out.posten = tuple(summen.items())
     km = _num(data.get("kilometerstand"))
     out.kilometerstand = int(km) if km else None
+    out.positionen = _ki_positionen(data.get("positionen"), out)
     return out
+
+
+def _ki_positionen(pos, d: BelegDaten) -> tuple:
+    """Fundstellen aus der KI-Antwort; nur gültige Rahmen, 0–1000-Angaben werden auf 0–1 umgerechnet."""
+    if not isinstance(pos, dict):
+        return ()
+    felder = {"kennzeichen": ("endziffer", d.fahrzeug.endziffer if d.fahrzeug else None), "datum": ("datum", d.datum),
+              "menge": ("liter", d.menge), "kraftstoff_preis": ("preis", d.kraftstoff_preis),
+              "waesche_preis": ("preis", d.waesche_preis), "kilometerstand": ("km", d.kilometerstand)}
+    aus = []
+    for name, box in pos.items():
+        if name not in felder or felder[name][1] is None or not isinstance(box, (list, tuple)) or len(box) != 4:
+            continue
+        try:
+            box = [float(v) for v in box]
+        except (TypeError, ValueError):
+            continue
+        if max(box) > 1 and max(box) <= 1000:
+            box = [v / 1000 for v in box]
+        x0, y0, x1, y1 = box
+        if 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1:
+            aus.append((*felder[name], (x0, y0, x1, y1)))
+    return tuple(aus)
 
 
 # ---------------------------------------------------------------- Ablauf je Beleg
@@ -773,6 +802,8 @@ def auswerten(seite: BelegSeite, fahrzeuge: FahrzeugListe, lang: str, ki=None,
                 if neu > 0:
                     korrigiert.append(f"kraftstoff_preis {_fmt(daten.kraftstoff_preis)} -> {_fmt(neu)}")
                     daten.kraftstoff_preis = neu
+        if bild is not None:
+            daten.positionen = llm.positionen
         if ergaenzt:
             daten.hinweise.append("KI ergänzt: " + ", ".join(ergaenzt))
         if korrigiert:
