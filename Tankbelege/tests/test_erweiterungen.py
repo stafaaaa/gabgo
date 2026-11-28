@@ -1,3 +1,4 @@
+import contextlib
 import json
 import sys
 import zipfile
@@ -700,13 +701,17 @@ def test_pruef_assistent_nutzt_geoeffnetes_excel(tmp_path, monkeypatch):
     class Bereich:
         def __init__(self, ref):
             self.ref = ref
+
         def ClearContents(self):
             zellen[self.ref] = None
-        def __setattr__(self, name, v):
-            if name == "Value":
-                zellen[self.ref] = v
-            else:
-                object.__setattr__(self, name, v)
+
+        @property
+        def Value(self):
+            return zellen.get(self.ref)
+
+        @Value.setter
+        def Value(self, v):
+            zellen[self.ref] = v
 
     blatt = types.SimpleNamespace(Range=Bereich)
     mappe = types.SimpleNamespace(FullName=str(ziel.resolve()), Worksheets=lambda name: blatt,
@@ -821,3 +826,33 @@ def test_vorschau_namen_eindeutig():
     namen = {pa.vorschau_name(Path(n), 1) for n in ["Scan 01.pdf", "Scan_01.pdf", "Scan_01.jpg", "Scan_01.png"]}
     assert len(namen) == 4 and "Scan_01_S1.png" in namen
     assert pa.vorschau_name(Path("2026-03_12-38.pdf"), 14) == "2026-03_12-38_S14.png"
+
+
+def test_pruef_assistent_zeile_verschoben(tmp_path):
+    _, ziel = _gelbe_datei(tmp_path)
+    erste, zweite = pa.gelbe_zeilen(ziel)
+    vorher = ziel.read_bytes()
+    with pytest.raises(VorlagenFehler, match="nicht mehr der geprüfte Beleg"):
+        pa.zeile_speichern(ziel, 3, pa.werte_lesen("1800", "21.01.2026", "30", "52,50", ""), erwartet=zweite)
+    assert ziel.read_bytes() == vorher
+    pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40", "71,96", ""), erwartet=erste)
+    assert [p.zeile for p in pa.gelbe_zeilen(ziel)] == [4]
+
+
+def test_pruef_assistent_liest_erst_unter_der_sperre(tmp_path, monkeypatch):
+    belege, ziel = _gelbe_datei(tmp_path)
+    import verarbeitung as v
+    echte_sperre = v._ziel_sperre
+
+    @contextlib.contextmanager
+    def sperre_mit_import(z, log):
+        monkeypatch.setattr(v, "_ziel_sperre", echte_sperre)
+        _pdf(tmp_path / "B3", "c.pdf", "Diesel 20,00 l 35,98\nSumme 35,98\n22.01.2026\nKennzeichen GE EL 545E\n"
+                                       "Kilometerstand 12000\nTankstelle")
+        verarbeiten(VORLAGE, tmp_path / "B3", ziel)  # Import endet kurz bevor der Assistent die Sperre bekommt
+        with echte_sperre(z, log):
+            yield
+    monkeypatch.setattr(v, "_ziel_sperre", sperre_mit_import)
+    erste = pa.gelbe_zeilen(ziel)[0]
+    pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40", "71,96", ""), erwartet=erste)
+    assert len(_eintragungen(ziel)) == 3

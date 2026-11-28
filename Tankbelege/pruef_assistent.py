@@ -165,7 +165,7 @@ def werte_lesen(endziffer: str, datum: str, liter: str, preis: str, km: str) -> 
     return Zeile(e, d, l_wert, p_wert, k_wert)
 
 
-def _in_offenem_excel_speichern(ziel: Path, n: int, z: Zeile, fz) -> bool:
+def _in_offenem_excel_speichern(ziel: Path, n: int, z: Zeile, fz, pruefen=lambda hinweis: None) -> bool:
     """Ist die Ziel-Datei in Excel geöffnet (Windows), dort direkt ändern und speichern. False = nicht offen."""
     try:
         import pythoncom
@@ -183,6 +183,7 @@ def _in_offenem_excel_speichern(ziel: Path, n: int, z: Zeile, fz) -> bool:
         if wb is None:
             return False
         ws = wb.Worksheets(SHEET_EINTRAG)
+        pruefen(str(ws.Range(f"H{n}").Value or ""))
         werte = {"A": fz.endziffer if fz else z.endziffer,
                  "D": datetime(z.datum.year, z.datum.month, z.datum.day) if z.datum else None,
                  "E": z.liter, "F": z.preis, "G": z.kilometerstand}
@@ -202,18 +203,24 @@ def _in_offenem_excel_speichern(ziel: Path, n: int, z: Zeile, fz) -> bool:
         pythoncom.CoUninitialize()
 
 
-def zeile_speichern(ziel: Path, n: int, z: Zeile, log=lambda m: None) -> str:
-    """Zeile n in der Ziel-Datei ersetzen und den Prüfhinweis (gelb) entfernen.
+def zeile_speichern(ziel: Path, n: int, z: Zeile, erwartet: PruefZeile | None = None, log=lambda m: None) -> str:
+    """Zeile n in der Ziel-Datei ersetzen und den Prüfhinweis (gelb) entfernen. erwartet: die geprüfte Zeile –
+    steht dort inzwischen ein anderer Beleg (z. B. nach Sortieren), wird nichts geändert.
     Gibt "excel" (im geöffneten Excel geändert) oder "datei" zurück."""
     from verarbeitung import _ziel_sperre, pruefe_ziel_frei
     ziel = Path(ziel)
-    excel = ExcelVorlage(ziel)
-    fz = excel.endziffer_bekannt(z.endziffer) if z.endziffer not in (None, "") else None
-    if _in_offenem_excel_speichern(ziel, n, z, fz):
+
+    def pruefen(hinweis):
+        if erwartet is not None and (hinweis or "") != erwartet.hinweis:
+            raise VorlagenFehler(f"In Excel-Zeile {n} steht nicht mehr der geprüfte Beleg (Tabelle sortiert oder "
+                                 "geändert?). Bitte das Prüf-Fenster schließen und neu öffnen.")
+    fz = ExcelVorlage(ziel).endziffer_bekannt(z.endziffer) if z.endziffer not in (None, "") else None
+    if _in_offenem_excel_speichern(ziel, n, z, fz, pruefen):
         return "excel"
     with _ziel_sperre(ziel, log):
         pruefe_ziel_frei(ziel)
-        excel.speichern(ziel, [], anhaengen=True, aktualisieren={n: z})
+        pruefen(next((p.hinweis for p in gelbe_zeilen(ziel) if p.zeile == n), None))
+        ExcelVorlage(ziel).speichern(ziel, [], anhaengen=True, aktualisieren={n: z})  # erst unter der Sperre lesen
     return "datei"
 
 
@@ -355,7 +362,7 @@ class PruefFenster:
         f = {k: v.get() for k, v in self.felder.items()}
         try:
             z = werte_lesen(f["endziffer"], f["datum"], f["liter"], f["preis"], f["km"])
-            zeile_speichern(self.ziel, self.zeilen[self.pos].zeile, z)
+            zeile_speichern(self.ziel, self.zeilen[self.pos].zeile, z, erwartet=self.zeilen[self.pos])
         except (ValueError, VorlagenFehler, OSError) as exc:
             return messagebox.showerror("Nicht gespeichert", str(exc), parent=self.win)
         self.bei_aenderung()
