@@ -332,3 +332,15 @@ def test_abgeleiteter_preis_ueberlebt_mehrheitsentscheid(fz):
     a = parse("Diesel 40,00 l\nAdBlue\nSumme 77,99", fz)
     assert a.preis_abgeleitet
     assert bc.combine([a, a]).preis_abgeleitet
+
+
+def test_motoroel_schreibweisen_zaehlen_einmal(fz):
+    d = parse("Öl 5W-30 12,90\nÖl 5W30 12,90\nSumme 12,90", fz)
+    assert liter(d) == [("Motoröl", 12.9)]
+
+
+def test_direkt_gelesener_preis_gewinnt_beim_mehrheitsentscheid(fz):
+    abgeleitet = parse("Diesel 40,00 l\nSumme 70,00", fz)
+    gelesen = parse("Diesel 40,00 l 70,00\nSumme 70,00", fz)
+    assert abgeleitet.preis_abgeleitet and not gelesen.preis_abgeleitet
+    assert not bc.combine([abgeleitet, gelesen]).preis_abgeleitet
