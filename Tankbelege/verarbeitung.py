@@ -66,6 +66,8 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
 
     gesamt = bc.count_belege(belege_ordner)
     gesehen = set(excel.vorhandene)
+    # Einträge, deren Preis in Excel ergänzt wurde, sollen ohne erkannten Preis nicht erneut erscheinen.
+    nachgetragen = {k[:3] for k in excel.vorhandene if k[3] is not None}
     neue: list[Zeile] = []
     fortschritt(0, gesamt, "Starte ...")
     for nr, seite in enumerate(bc.iter_belege(belege_ordner), 1):
@@ -102,8 +104,12 @@ def verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ollama: bool = F
                 and abs(daten.summe - daten.kraftstoff_preis - (daten.waesche_preis or 0)) > 0.02):
             hinweise.append(f"{seite.name}: Summe {daten.summe:.2f} passt nicht zu Kraftstoff + Wäsche – bitte prüfen.")
         for z in zeilen_aus_beleg(daten, seite.name):
-            # Ohne erkannten Preis zählt auch ein Eintrag, dessen Preis nachträglich ergänzt wurde.
-            if z.key() in gesehen or (z.preis is None and z.key()[:3] in {k[:3] for k in gesehen}):
+            if z.preis is None and z.key()[:3] in nachgetragen:
+                ergebnis.duplikate += 1
+                hinweise.append(f"{seite.name}: Preis nicht erkannt, gleicher Eintrag mit Preis steht schon in "
+                                f"der Datei – als Duplikat übersprungen, bitte prüfen ({_zeile_text(z)})")
+                continue
+            if z.key() in gesehen:
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: Duplikat übersprungen ({_zeile_text(z)})")
                 continue
