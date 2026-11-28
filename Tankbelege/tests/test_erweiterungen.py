@@ -879,3 +879,15 @@ def test_teilweise_gepruefter_kombibeleg_wird_ergaenzt(tmp_path):
     erg = verarbeiten(VORLAGE, tmp_path / "B2", ziel)
     assert erg.zeilen == [] and len(erg.ergaenzt) == 1
     assert sorted(str(r[0]) for r in _eintragungen(ziel)) == ["1800", "1800"]
+
+
+def test_km_vermutete_zuordnung_erweitert_korridor_nicht():
+    import verarbeitung as v
+    excel = ExcelVorlage(VORLAGE)
+    fz = excel.endziffer_bekannt(1800)
+    basis = bc.BelegDaten(fahrzeug=fz, datum=date(2026, 1, 1), kilometerstand=10000)
+    a = bc.BelegDaten(datum=date(2026, 1, 3), kilometerstand=11400)
+    b = bc.BelegDaten(datum=date(2026, 1, 5), kilometerstand=12800)
+    b.fahrzeug = bc.Fahrzeug("4711", "GE EL 4711", "Neu", neu=True)
+    assert v._km_zuordnung(excel, [basis, a, b]) == {id(a)}
+    assert b.fahrzeug.endziffer == "4711"

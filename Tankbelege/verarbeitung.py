@@ -395,10 +395,10 @@ def _km_zuordnung(excel: ExcelVorlage, belege: list[bc.BelegDaten]) -> set[int]:
         return fz is not None and not _ohne_endziffer(fz.endziffer) and not (fz.neu and fz.fahrer == "Neu")
     verlauf: dict[str, list] = {}
     fahrzeug: dict[str, bc.Fahrzeug] = {}
-    def merken(fz, datum, km):
+    def merken(fz, datum, km, sicher=True):
         k = excel.fahrzeuge.eintrag_schluessel((fz.endziffer,))[0]
         fahrzeug.setdefault(k, fz)
-        verlauf.setdefault(k, []).append((datum, km))
+        verlauf.setdefault(k, []).append((datum, km, sicher))
     for _, key, km in excel.eintrag_zeilen:
         fz = None if _ohne_endziffer(key[0]) else excel.endziffer_bekannt(key[0])
         if km is not None and bekannt(fz):
@@ -408,11 +408,11 @@ def _km_zuordnung(excel: ExcelVorlage, belege: list[bc.BelegDaten]) -> set[int]:
             merken(d.fahrzeug, d.datum, d.kilometerstand)
 
     def passt(punkte, datum, km):
-        kms = [k for _, k in punkte]
+        kms = [k for _, k, sicher in punkte if sicher]  # nur bestätigte Punkte bilden den Korridor
         if not min(kms) - KM_TOLERANZ <= km <= max(kms) + KM_TOLERANZ:
             return False
         return datum is None or all(not (d and ((d < datum and k > km) or (d > datum and k < km)))
-                                    for d, k in punkte)
+                                    for d, k, _ in punkte)
     zugeordnet = set()
     offen = [d for d in belege if d.kilometerstand is not None and not bekannt(d.fahrzeug)]
     for d in sorted(offen, key=lambda d: (d.datum is None, d.datum or date.min)):
@@ -420,7 +420,7 @@ def _km_zuordnung(excel: ExcelVorlage, belege: list[bc.BelegDaten]) -> set[int]:
         if len(treffer) == 1:
             d.fahrzeug = fahrzeug[treffer[0]]
             zugeordnet.add(id(d))
-            merken(d.fahrzeug, d.datum, d.kilometerstand)  # folgende Belege müssen auch hierzu passen
+            merken(d.fahrzeug, d.datum, d.kilometerstand, sicher=False)  # folgende Belege müssen zeitlich dazu passen
     return zugeordnet
 
 
