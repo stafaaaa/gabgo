@@ -912,3 +912,10 @@ def test_zuschneiden_behaelt_abgesetzte_notiz():
         d.rectangle((100, y, 480, y + 15), fill="black")
     d.rectangle((150, 1800, 260, 1830), fill="black")  # handschriftlicher km-Stand mit Abstand darunter
     assert pa.zuschneiden(im).height > 1700
+
+
+def test_korrektur_ohne_endziffer_unterdrueckt_andere_fahrzeuge_nicht(tmp_path):
+    import verarbeitung as v
+    alt = Zeile(None, date(2026, 1, 20), "Wäsche", 11.49).key()
+    assert v._korrigiert(alt, [alt])
+    assert not v._korrigiert(Zeile("545E", date(2026, 1, 20), "Wäsche", 11.49).key(), [alt])

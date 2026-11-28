@@ -378,9 +378,8 @@ def _ohne_endziffer(endziffer) -> bool:
 
 
 def _korrigiert(k: tuple, korrigiert: list[tuple]) -> bool:
-    """Gleiche Werte wie eine im Prüf-Assistenten korrigierte Zeile (fehlende Endziffer zählt als gleich)."""
-    return any(k == alt or ((_ohne_endziffer(alt[0]) or _ohne_endziffer(k[0])) and alt[1:] == k[1:])
-               for alt in korrigiert)
+    """Exakt dieselben Werte wie die ursprünglich gelesene, im Prüf-Assistenten korrigierte Zeile."""
+    return k in korrigiert
 
 
 def _ohne_endziffer_gleich(alt: tuple, neu: tuple) -> bool:
