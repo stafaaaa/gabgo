@@ -856,3 +856,13 @@ def test_pruef_assistent_liest_erst_unter_der_sperre(tmp_path, monkeypatch):
     erste = pa.gelbe_zeilen(ziel)[0]
     pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40", "71,96", ""), erwartet=erste)
     assert len(_eintragungen(ziel)) == 3
+
+
+def test_korrigierter_beleg_wird_nicht_erneut_gebucht(tmp_path):
+    belege, ziel = _gelbe_datei(tmp_path)
+    erste, zweite = pa.gelbe_zeilen(ziel)
+    pa.zeile_speichern(ziel, 3, pa.werte_lesen("545E", "20.01.2026", "40", "72,96", "11900"), erwartet=erste)
+    pa.zeile_speichern(ziel, 4, pa.werte_lesen("1800", "21.01.2026", "30", "52,50", "6000"), erwartet=zweite)
+    erg = verarbeiten(VORLAGE, belege, ziel)
+    assert erg.zeilen == [] and erg.ergaenzt == []
+    assert len(_eintragungen(ziel)) == 2

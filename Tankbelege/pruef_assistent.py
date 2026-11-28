@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
@@ -203,6 +204,37 @@ def _in_offenem_excel_speichern(ziel: Path, n: int, z: Zeile, fz, pruefen=lambda
         pythoncom.CoUninitialize()
 
 
+KORREKTUREN = "korrekturen.json"
+
+
+def _korrekturen_datei(ziel: Path) -> Path:
+    return Path(ziel).parent / VORSCHAU_ORDNER / KORREKTUREN
+
+
+def _korrektur_merken(ziel: Path, alt: PruefZeile) -> None:
+    """Die ursprünglich gelesenen Werte merken, damit ein erneuter Import desselben Scans sie nicht wieder einträgt."""
+    datei = _korrekturen_datei(ziel)
+    try:
+        daten = json.loads(datei.read_text("utf-8"))
+    except (OSError, ValueError):
+        daten = {}
+    eintrag = [alt.endziffer, alt.datum.isoformat() if alt.datum else None, alt.liter, alt.preis]
+    liste = daten.setdefault(Path(ziel).name, [])
+    if eintrag not in liste:
+        liste.append(eintrag)
+        datei.parent.mkdir(parents=True, exist_ok=True)
+        datei.write_text(json.dumps(daten, ensure_ascii=False, indent=1), "utf-8")
+
+
+def korrekturen_laden(ziel: Path) -> list[tuple]:
+    """Schlüssel (Endziffer, Datum, Liter, Preis) der im Prüf-Assistenten korrigierten Original-Werte."""
+    try:
+        liste = json.loads(_korrekturen_datei(ziel).read_text("utf-8")).get(Path(ziel).name, [])
+        return [Zeile(e, date.fromisoformat(d) if d else None, l, p).key() for e, d, l, p in liste]
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
+
+
 def zeile_speichern(ziel: Path, n: int, z: Zeile, erwartet: PruefZeile | None = None, log=lambda m: None) -> str:
     """Zeile n in der Ziel-Datei ersetzen und den Prüfhinweis (gelb) entfernen. erwartet: die geprüfte Zeile –
     steht dort inzwischen ein anderer Beleg (z. B. nach Sortieren), wird nichts geändert.
@@ -216,12 +248,17 @@ def zeile_speichern(ziel: Path, n: int, z: Zeile, erwartet: PruefZeile | None = 
                                  "geändert?). Bitte das Prüf-Fenster schließen und neu öffnen.")
     fz = ExcelVorlage(ziel).endziffer_bekannt(z.endziffer) if z.endziffer not in (None, "") else None
     if _in_offenem_excel_speichern(ziel, n, z, fz, pruefen):
-        return "excel"
-    with _ziel_sperre(ziel, log):
-        pruefe_ziel_frei(ziel)
-        pruefen(next((p.hinweis for p in gelbe_zeilen(ziel) if p.zeile == n), None))
-        ExcelVorlage(ziel).speichern(ziel, [], anhaengen=True, aktualisieren={n: z})  # erst unter der Sperre lesen
-    return "datei"
+        art = "excel"
+    else:
+        with _ziel_sperre(ziel, log):
+            pruefe_ziel_frei(ziel)
+            pruefen(next((p.hinweis for p in gelbe_zeilen(ziel) if p.zeile == n), None))
+            ExcelVorlage(ziel).speichern(ziel, [], anhaengen=True, aktualisieren={n: z})  # erst unter der Sperre lesen
+        art = "datei"
+    if erwartet is not None and Zeile(erwartet.endziffer, erwartet.datum, erwartet.liter, erwartet.preis).key() \
+            != replace(z, endziffer=fz.endziffer if fz else z.endziffer).key():
+        _korrektur_merken(ziel, erwartet)
+    return art
 
 
 # ------------------------------------------------------------------ Fenster

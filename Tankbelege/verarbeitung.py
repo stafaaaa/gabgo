@@ -178,6 +178,7 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
     # Einträge, deren Preis in Excel ergänzt wurde, sollen ohne erkannten Preis nicht erneut erscheinen.
     nachgetragen = {schluessel(k)[:3] for k in excel.vorhandene if k[3] is not None}
     eintraege = [schluessel(k) for k in excel.eintraege]
+    korrigiert = [schluessel(k) for k in pruef_assistent.korrekturen_laden(ziel)] if anhaengen else []
     neue: list[Zeile] = []
     ergaenzen: dict[int, Zeile] = {}
     gelesen: list[tuple] = []
@@ -261,6 +262,10 @@ def _verarbeiten(vorlage: Path, belege_ordner: Path, ziel: Path, ki: ki_anbieter
         if len(ziele) < sum(not _unvollstaendig(z) for z in pz):
             ziele = {}  # derselbe Beleg nur, wenn alle Positionen übereinstimmen (z. B. nicht nur die Wäsche)
         for z in pz:
+            if _korrigiert(schluessel(z.key()), korrigiert):
+                ergebnis.duplikate += 1
+                hinweise.append(f"{seite.name}: im Prüf-Assistenten schon korrigiert – übersprungen ({_zeile_text(z)})")
+                continue
             if _unvollstaendig(z) and any(_teil_gleich(schluessel(z.key()), k) for k in eintraege):
                 ergebnis.duplikate += 1
                 hinweise.append(f"{seite.name}: unvollständiger Eintrag steht schon in der Datei – "
@@ -368,6 +373,12 @@ KM_TOLERANZ = 1500
 
 def _ohne_endziffer(endziffer) -> bool:
     return endziffer in (None, "", 0, "0")
+
+
+def _korrigiert(k: tuple, korrigiert: list[tuple]) -> bool:
+    """Gleiche Werte wie eine im Prüf-Assistenten korrigierte Zeile (fehlende Endziffer zählt als gleich)."""
+    return any(k == alt or ((_ohne_endziffer(alt[0]) or _ohne_endziffer(k[0])) and alt[1:] == k[1:])
+               for alt in korrigiert)
 
 
 def _ohne_endziffer_gleich(alt: tuple, neu: tuple) -> bool:
